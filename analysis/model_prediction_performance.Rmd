@@ -1,0 +1,89 @@
+# RTS Model V2 Performance Analysis
+
+## TODO:
+- get authorization to save properly
+- make sure that folders for temp files are being removed
+
+## Load Libraries
+```{r, include = FALSE}
+library(terra)
+library(sf)
+library(viridis)
+library(googledrive)
+library(tidyverse)
+```
+
+## Load Data
+### RTS Polygons
+```{r, include = FALSE}
+
+```
+
+### Maxar GeoTiffs
+```{r, include = FALSE}
+maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1QeDd1EQdPekG9o990m5oIOp5Ql8p7893',
+                             pattern = 'tif$') %>%
+  arrange(name)
+maxar_preds <- list()
+for (file in maxar_pred_files$name) {
+  temp <- tempfile(fileext = ".tif")
+  dl <- drive_download(
+    maxar_pred_files %>%
+      filter(name == file), 
+    path = temp, 
+    overwrite = TRUE)
+  maxar_preds[[length(maxar_preds) + 1]] <- rast(as.character(dl[,'local_path']))
+}
+```
+
+### Planet GeoTiffs
+```{r, include = FALSE}
+planet_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1rw-QzELHwDCF6LKGxYf9tgnNJpxcKFCa',
+                             pattern = 'tif$') %>%
+  arrange(name)
+planet_preds <- list()
+for (file in planet_pred_files$name) {
+  temp <- tempfile(fileext = ".tif")
+  dl <- drive_download(
+    planet_pred_files %>%
+      filter(name == file), 
+    path = temp, 
+    overwrite = TRUE)
+  planet_preds[[length(planet_preds) + 1]] <- rast(as.character(dl[,'local_path']))
+}
+```
+
+### Sentinel GeoTiffs
+```{r, include = FALSE}
+sentinel_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-7gDRrcdFUDJBS-mROYULEL48Q2386vo',
+                             pattern = 'tif$') %>%
+  arrange(name)
+sentinel_preds <- list()
+for (file in sentinel_pred_files$name) {
+  temp <- tempfile(fileext = ".tif")
+  dl <- drive_download(
+    sentinel_pred_files %>%
+      filter(name == file), 
+    path = temp, 
+    overwrite = TRUE)
+  sentinel_preds[[length(sentinel_preds) + 1]] <- rast(as.character(dl[,'local_path']))
+}
+```
+
+## Taking a Look
+```{r}
+maxar_preds[[1]]
+names(maxar_preds[[1]])
+plot(maxar_preds[[1]])
+plotRGB(maxar_preds[[1]], r = 'b3', g = 'b2', b = 'b1')
+```
+
+```{r}
+test <- sprc(maxar_preds)
+test
+```
+
+```{r}
+ext(test)
+```
+
