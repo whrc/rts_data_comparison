@@ -1,10 +1,14 @@
 # RTS Model V2 Performance Analysis
 
 ## TODO:
-- get authorization to save properly
-- make sure that folders for temp files are being removed
+
+-   get authorization to work consistently
+-   Figure out why there are multiple polygons for each imagery type and polygon.
+-   Figure out why validation polygons won't convert to vector properly. The output looks like it is coming from the prediction layer not the validation layer.
+-   Figure out which polygons the predictions were run for.
 
 ## Load Libraries
+
 ```{r, include = FALSE}
 library(terra)
 library(sf)
@@ -13,77 +17,140 @@ library(googledrive)
 library(tidyverse)
 ```
 
+## Prep Google Drive Authentication
+
+```{r, include = FALSE}
+drive_auth(email = 'hrodenhizer@woodwellclimate.org')
+```
+
 ## Load Data
+
+```{r}
+rast_from_googledrive <- function(name, id, drive_resource) {
+  current <- as_dribble(id)
+  temp <- tempfile(fileext = ".tif")
+  dl <- drive_download(
+    current, 
+    path = temp, 
+    overwrite = TRUE)
+  raster <- rast(as.character(dl[,'local_path']))
+  names(raster) <- c('prediction', 'validation')
+  return(raster)
+
+}
+```
+
 ### RTS Polygons
+
 ```{r, include = FALSE}
 
 ```
 
 ### Maxar GeoTiffs
+
 ```{r, include = FALSE}
-maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1QeDd1EQdPekG9o990m5oIOp5Ql8p7893',
+maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/10btUO5v9iLRRM0WM5hstBXgtfYEfSYGZ',
                              pattern = 'tif$') %>%
   arrange(name)
-maxar_preds <- list()
-for (file in maxar_pred_files$name) {
-  temp <- tempfile(fileext = ".tif")
-  dl <- drive_download(
-    maxar_pred_files %>%
-      filter(name == file), 
-    path = temp, 
-    overwrite = TRUE)
-  maxar_preds[[length(maxar_preds) + 1]] <- rast(as.character(dl[,'local_path']))
-}
+
+maxar_preds <- maxar_pred_files %>%
+  pmap(rast_from_googledrive)
 ```
 
 ### Planet GeoTiffs
+
 ```{r, include = FALSE}
-planet_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1rw-QzELHwDCF6LKGxYf9tgnNJpxcKFCa',
+planet_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1Y28fskc7woYjZgh14xP-SBs-bKuG_PW0',
                              pattern = 'tif$') %>%
   arrange(name)
-planet_preds <- list()
-for (file in planet_pred_files$name) {
-  temp <- tempfile(fileext = ".tif")
-  dl <- drive_download(
-    planet_pred_files %>%
-      filter(name == file), 
-    path = temp, 
-    overwrite = TRUE)
-  planet_preds[[length(planet_preds) + 1]] <- rast(as.character(dl[,'local_path']))
-}
+
+planet_preds <- planet_pred_files %>%
+  pmap(rast_from_googledrive)
 ```
 
 ### Sentinel GeoTiffs
+
 ```{r, include = FALSE}
-sentinel_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-7gDRrcdFUDJBS-mROYULEL48Q2386vo',
+sentinel_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1HygGBu1WZatYv1ejU80nOynGkYQU0Rsg',
                              pattern = 'tif$') %>%
   arrange(name)
-sentinel_preds <- list()
-for (file in sentinel_pred_files$name) {
-  temp <- tempfile(fileext = ".tif")
-  dl <- drive_download(
-    sentinel_pred_files %>%
-      filter(name == file), 
-    path = temp, 
-    overwrite = TRUE)
-  sentinel_preds[[length(sentinel_preds) + 1]] <- rast(as.character(dl[,'local_path']))
+
+sentinel_preds <- sentinel_pred_files %>%
+  pmap(rast_from_googledrive)
+```
+
+## Convert Predictions to Vector
+
+```{r}
+pred_as_poly <- function(prediction) {
+  layer <- prediction[['prediction']]
+  layer[layer >= 0.5] <- 1
+  layer[layer < 0.5] <- NA
+  return(
+    st_transform(
+      st_as_sf(as.polygons(layer, values = FALSE)), 
+      crs = 4326
+    )
+  )
 }
 ```
 
-## Taking a Look
+### Maxar
+
 ```{r}
-maxar_preds[[1]]
-names(maxar_preds[[1]])
-plot(maxar_preds[[1]])
-plotRGB(maxar_preds[[1]], r = 'b3', g = 'b2', b = 'b1')
+maxar_pred_polys <- maxar_preds %>%
+  map_dfr(~ pred_as_poly(.x)) %>%
+  mutate(id = seq(0, (nrow(.) - 1)),
+         imagery = 'maxar')
+```
+
+### Planet
+
+```{r}
+planet_pred_polys <- planet_preds %>%
+  map_dfr(~ pred_as_poly(.x)) %>%
+  mutate(id = seq(0, (nrow(.) - 1)),
+         imagery = 'planet')
+```
+
+### Sentinel
+
+```{r}
+sentinel_pred_polys <- sentinel_preds %>%
+  map_dfr(~ pred_as_poly(.x)) %>%
+  mutate(id = seq(0, (nrow(.) - 1)),
+         imagery = 'sentinel')
 ```
 
 ```{r}
-test <- sprc(maxar_preds)
-test
+pred_polys <- maxar_pred_polys %>%
+  rbind(planet_pred_polys) %>%
+  rbind(sentinel_pred_polys)
+class(pred_polys)
 ```
+
+## Convert Validation to Vector
 
 ```{r}
-ext(test)
+test <- maxar_preds[[1]][[2]]
+plot(test)
+# wtf? This outline looks like the 50% threshold for the prediction, not the validation polygon!
+test <- as.polygons(test)
+plot(test)
 ```
 
+## Plot
+
+```{r}
+pal_viridis <- colorFactor("viridis", pred_polys$imagery)
+
+leaflet() %>%
+  addProviderTiles('Esri.WorldImagery') %>%
+  addPolygons(data = pred_polys, 
+              color = ~ pal_viridis(imagery),
+              fill = FALSE,
+              weight = 2) %>%
+  addLegend(data = pred_polys, 
+            pal = pal_viridis, 
+            values = ~ imagery)
+```
