@@ -1,3 +1,8 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
 # RTS Model V2 Performance Analysis
 
 ## TODO:
@@ -12,8 +17,10 @@
 ```{r, include = FALSE}
 library(terra)
 library(sf)
+library(leaflet)
 library(viridis)
 library(googledrive)
+library(jsonlite)
 library(tidyverse)
 ```
 
@@ -25,18 +32,44 @@ drive_auth(email = 'hrodenhizer@woodwellclimate.org')
 
 ## Load Data
 
-```{r}
-rast_from_googledrive <- function(name, id, drive_resource) {
+```{r, include = FALSE}
+make_my_dir <- function(output_dir) {
+
+  if (!dir.exists(output_dir)){
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+}
+```
+
+```{r, include = FALSE}
+rast_from_googledrive <- function(name, id, drive_resource, directory) {
   current <- as_dribble(id)
-  temp <- tempfile(fileext = ".tif")
-  dl <- drive_download(
-    current, 
-    path = temp, 
-    overwrite = TRUE)
-  raster <- rast(as.character(dl[,'local_path']))
+  make_my_dir(directory)
+  filepath = paste0(directory, name)
+  print(filepath)
+  try(dl <- drive_download(
+    current,
+    path = filepath,
+    overwrite = FALSE))
+  raster <- rast(filepath)
   names(raster) <- c('prediction', 'validation')
   return(raster)
+}
+```
 
+```{r, include = FALSE}
+json_from_googledrive <- function(name, id, drive_resource, directory) {
+  current <- as_dribble(id)
+  make_my_dir(directory)
+  filepath = paste0(directory, name)
+  try(dl <- drive_download(
+    current,
+    path = filepath,
+    overwrite = FALSE),
+    silent = TRUE)
+  json <- fromJSON(txt = filepath)
+  return(json)
 }
 ```
 
@@ -48,35 +81,200 @@ rast_from_googledrive <- function(name, id, drive_resource) {
 
 ### Maxar GeoTiffs
 
+#### 20220925-105508
+Parameters:
+
+```{r, echo = FALSE}
+# json metadata
+metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1jUsWsjRPGSROwsT8ENHdsRhxen0p0FlN',
+                             pattern = 'json$')
+maxar_metadata_1 <- metadata %>%
+  pmap(
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20220925-105508/')
+    )
+maxar_metadata_1 %>%
+  toJSON() %>%
+  minify()
+```
+
+```{r, include = FALSE}
+maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1jUsWsjRPGSROwsT8ENHdsRhxen0p0FlN',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+maxar_preds_1 <- maxar_pred_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20220925-105508/')
+    )
+```
+
+#### 20220925-105508-fixed
+Parameters:
+
+```{r, echo = FALSE}
+# json metadata
+metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1HGSyxXaIoyGNY0nI6Rbqg7evPMZa_iAm',
+                             pattern = 'json$')
+maxar_metadata_2 <- metadata %>%
+  pmap(
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20220925-105508-fixed/')
+    )
+maxar_metadata_2 %>%
+  toJSON() %>%
+  minify()
+```
+
+```{r, include = FALSE}
+maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1HGSyxXaIoyGNY0nI6Rbqg7evPMZa_iAm',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+maxar_preds_2 <- maxar_pred_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20220925-105508-fixed/')
+    )
+```
+
+
+#### 20230317-181045
+Parameters:
+
+```{r, echo = FALSE}
+# json metadata
+metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1QicQlzWuaMh-muI28FPz-TlwTybAcB8T',
+                             pattern = 'json$')
+maxar_metadata_3 <- metadata %>%
+  pmap(
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20230317-181045/')
+    )
+maxar_metadata_3 %>%
+  toJSON() %>%
+  minify()
+```
+
+```{r, include = FALSE}
+maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1QicQlzWuaMh-muI28FPz-TlwTybAcB8T',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+maxar_preds_3 <- maxar_pred_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20230317-181045/')
+    )
+```
+
+
+
+#### 20230426-213214
+Parameters:
+
+```{r, echo = FALSE}
+# json metadata
+metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/10btUO5v9iLRRM0WM5hstBXgtfYEfSYGZ',
+                             pattern = 'json$')
+maxar_metadata_4 <- metadata %>%
+  pmap(
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20230426-213214/')
+    )
+maxar_metadata_4 %>%
+  toJSON() %>%
+  minify()
+```
+
 ```{r, include = FALSE}
 maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/10btUO5v9iLRRM0WM5hstBXgtfYEfSYGZ',
                              pattern = 'tif$') %>%
   arrange(name)
 
-maxar_preds <- maxar_pred_files %>%
-  pmap(rast_from_googledrive)
+maxar_preds_4 <- maxar_pred_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20230426-213214/')
+    )
 ```
 
 ### Planet GeoTiffs
+
+#### 20230411-102851
+
+Parameters:
+```{r, echo = FALSE}
+# json metadata
+metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/15vdbvwgMh5RCnEzJekWY0_sVD4s4-fec',
+                             pattern = 'json$')
+planet_metadata_1 <- metadata %>%
+  pmap(
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/planet/predictions-m20230411-102851/')
+    )
+planet_metadata_1 %>%
+  toJSON() %>%
+  minify()
+```
+
+```{r, include = FALSE}
+planet_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/15vdbvwgMh5RCnEzJekWY0_sVD4s4-fec',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+planet_preds_1 <- planet_pred_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/predictions-m20230411-102851/')
+    )
+```
+
+#### 20230411-102851-fixed
+
+Parameters:
+```{r, echo = FALSE}
+# json metadata
+metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1Y28fskc7woYjZgh14xP-SBs-bKuG_PW0',
+                             pattern = 'json$')
+planet_metadata_2 <- metadata %>%
+  pmap(
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/planet/predictions-m20230411-102851-fixed/')
+    )
+planet_metadata_2 %>%
+  toJSON() %>%
+  minify()
+```
 
 ```{r, include = FALSE}
 planet_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1Y28fskc7woYjZgh14xP-SBs-bKuG_PW0',
                              pattern = 'tif$') %>%
   arrange(name)
 
-planet_preds <- planet_pred_files %>%
-  pmap(rast_from_googledrive)
+planet_preds_2 <- planet_pred_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/predictions-m20230411-102851-fixed/')
+    )
 ```
 
 ### Sentinel GeoTiffs
+
+#### 20220923-131534
+
+Parameters:
+```{r, echo = FALSE}
+# json metadata
+metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1HygGBu1WZatYv1ejU80nOynGkYQU0Rsg',
+                             pattern = 'json$')
+sentinel_metadata_1 <- metadata %>%
+  pmap(
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-m20220923-131534/')
+    )
+sentinel_metadata_1 %>%
+  toJSON() %>%
+  minify()
+```
 
 ```{r, include = FALSE}
 sentinel_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1HygGBu1WZatYv1ejU80nOynGkYQU0Rsg',
                              pattern = 'tif$') %>%
   arrange(name)
 
-sentinel_preds <- sentinel_pred_files %>%
-  pmap(rast_from_googledrive)
+sentinel_preds_1 <- sentinel_pred_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-m20220923-131534/')
+    )
 ```
 
 ## Convert Predictions to Vector
@@ -93,6 +291,13 @@ pred_as_poly <- function(prediction) {
     )
   )
 }
+```
+
+For now, use this to choose which version of the model output to use.
+```{r}
+maxar_preds <- maxar_preds_2
+planet_preds <- planet_preds_2
+sentinel_preds <- sentinel_preds_1
 ```
 
 ### Maxar
@@ -122,6 +327,8 @@ sentinel_pred_polys <- sentinel_preds %>%
          imagery = 'sentinel')
 ```
 
+
+### Join Polygons into One SF Dataframe
 ```{r}
 pred_polys <- maxar_pred_polys %>%
   rbind(planet_pred_polys) %>%
@@ -132,11 +339,84 @@ class(pred_polys)
 ## Convert Validation to Vector
 
 ```{r}
-test <- maxar_preds[[1]][[2]]
+plot(maxar_preds_2[[1]])
+plot(maxar_preds_2[[1]][[2]])
+maxar_preds_2[[1]]
+print('\n')
+hist(maxar_preds_2[[1]], layer = 'validation')
+hist(maxar_preds_2[[1]], layer = 'prediction')
+test <- deepcopy(maxar_preds_2[[1]][['validation']])
 plot(test)
+test
+# test <- classify(test, 
+#                  matrix(
+#                    c(0, 0.025, NA,
+#                      0.025, 1, 1),
+#                    ncol = 3,
+#                    byrow = TRUE
+#                    ))
+# plot(test)
+hist(test)
 # wtf? This outline looks like the 50% threshold for the prediction, not the validation polygon!
+test_poly <- as.polygons(test)
+plot(test_poly)
+```
+```{r}
+r1 <- rast(ncol=4, nrow=4)
+names(r1) <- c('r1')
+r2 <- deepcopy(r1)
+names(r2) <- c('r2')
+set.seed(0)
+values(r1) <- c(0, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 1, 1, 0,
+                0, 0, 0, 0)
+set.seed(1)
+values(r2) <- c(0, 0, 0, 1,
+                0, 0, 1, 1,
+                0, 0, 1, 1,
+                0, 0, 0, 0)
+r <- c(r1, r2)
+plot(r)
+
+r[['r2']]
+print('\n')
+test <- as.polygons(r[['r2']])
+plot(test)
+
+r[[2]]
+print('\n')
+test <- as.polygons(r[[2]])
+plot(test)
+
+r[[r2]]
+print('\n')
+test <- as.polygons(r[[r2]])
+plot(test)
+
+r2 <- deepcopy(r[['r2']])
+print('\n')
+test <- as.polygons(r2)
+plot(test)
+
+test <- deepcopy(r[['r2']])
 test <- as.polygons(test)
 plot(test)
+```
+
+```{r}
+prediction <- rast('./data/maxar/predictions-m20220925-105508-fixed/000.tif')
+prediction
+print('\n')
+names(prediction) <- c('prediction', 'validation')
+plot(prediction)
+
+val_layer <- subset(prediction, 'validation')
+val_poly <- as.polygons(val_layer)
+plot(val_poly)
+
+subset(prediction, 'validation')
+plot(subset(prediction, 'validation'))
 ```
 
 ## Plot
