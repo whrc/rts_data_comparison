@@ -288,7 +288,10 @@ pred_as_poly <- function(prediction) {
     st_transform(
       st_as_sf(as.polygons(layer, values = FALSE)), 
       crs = 4326
-    )
+    ) %>%
+      mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
+                                                            '/')[[1]]), 
+                                             '\\.')[[1]])))
   )
 }
 ```
@@ -305,8 +308,11 @@ sentinel_preds <- sentinel_preds_1
 ```{r}
 maxar_pred_polys <- maxar_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
-  mutate(id = seq(0, (nrow(.) - 1)),
-         imagery = 'maxar')
+  mutate(imagery = 'maxar')
+
+maxar_pred_polys_ls <- maxar_preds %>%
+  map(~ pred_as_poly(.x) %>%
+        mutate(imagery = 'maxar'))
 ```
 
 ### Planet
@@ -314,8 +320,11 @@ maxar_pred_polys <- maxar_preds %>%
 ```{r}
 planet_pred_polys <- planet_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
-  mutate(id = seq(0, (nrow(.) - 1)),
-         imagery = 'planet')
+  mutate(imagery = 'planet')
+
+planet_pred_polys_ls <- planet_preds %>%
+  map(~ pred_as_poly(.x) %>%
+        mutate(imagery = 'planet'))
 ```
 
 ### Sentinel
@@ -323,8 +332,11 @@ planet_pred_polys <- planet_preds %>%
 ```{r}
 sentinel_pred_polys <- sentinel_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
-  mutate(id = seq(0, (nrow(.) - 1)),
-         imagery = 'sentinel')
+  mutate(imagery = 'sentinel')
+
+sentinel_pred_polys_ls <- sentinel_preds %>%
+  map(~ pred_as_poly(.x) %>%
+        mutate(imagery = 'sentinel'))
 ```
 
 
@@ -333,90 +345,117 @@ sentinel_pred_polys <- sentinel_preds %>%
 pred_polys <- maxar_pred_polys %>%
   rbind(planet_pred_polys) %>%
   rbind(sentinel_pred_polys)
-class(pred_polys)
 ```
 
 ## Convert Validation to Vector
 
 ```{r}
-plot(maxar_preds_2[[1]])
-plot(maxar_preds_2[[1]][[2]])
-maxar_preds_2[[1]]
-print('\n')
-hist(maxar_preds_2[[1]], layer = 'validation')
-hist(maxar_preds_2[[1]], layer = 'prediction')
-test <- deepcopy(maxar_preds_2[[1]][['validation']])
-plot(test)
-test
-# test <- classify(test, 
-#                  matrix(
-#                    c(0, 0.025, NA,
-#                      0.025, 1, 1),
-#                    ncol = 3,
-#                    byrow = TRUE
-#                    ))
-# plot(test)
-hist(test)
-# wtf? This outline looks like the 50% threshold for the prediction, not the validation polygon!
-test_poly <- as.polygons(test)
-plot(test_poly)
-```
-```{r}
-r1 <- rast(ncol=4, nrow=4)
-names(r1) <- c('r1')
-r2 <- deepcopy(r1)
-names(r2) <- c('r2')
-set.seed(0)
-values(r1) <- c(0, 0, 0, 0,
-                0, 1, 0, 0,
-                0, 1, 1, 0,
-                0, 0, 0, 0)
-set.seed(1)
-values(r2) <- c(0, 0, 0, 1,
-                0, 0, 1, 1,
-                0, 0, 1, 1,
-                0, 0, 0, 0)
-r <- c(r1, r2)
-plot(r)
-
-r[['r2']]
-print('\n')
-test <- as.polygons(r[['r2']])
-plot(test)
-
-r[[2]]
-print('\n')
-test <- as.polygons(r[[2]])
-plot(test)
-
-r[[r2]]
-print('\n')
-test <- as.polygons(r[[r2]])
-plot(test)
-
-r2 <- deepcopy(r[['r2']])
-print('\n')
-test <- as.polygons(r2)
-plot(test)
-
-test <- deepcopy(r[['r2']])
-test <- as.polygons(test)
-plot(test)
+val_as_poly <- function(prediction) {
+  layer <- prediction[['validation']]
+  layer <- classify(layer, 
+                    matrix(c(0, NA,
+                             1, 1),
+                           ncol = 2,
+                           byrow = TRUE))
+  return(
+    st_transform(
+      st_as_sf(as.polygons(layer, values = FALSE)), 
+      crs = 4326
+    ) %>%
+      mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
+                                                            '/')[[1]]), 
+                                             '\\.')[[1]])))
+  )
+}
 ```
 
+### Maxar
+
 ```{r}
-prediction <- rast('./data/maxar/predictions-m20220925-105508-fixed/000.tif')
-prediction
-print('\n')
-names(prediction) <- c('prediction', 'validation')
-plot(prediction)
+maxar_val_polys <- maxar_preds %>%
+  map_dfr(~ val_as_poly(.x)) %>%
+  mutate(imagery = 'maxar')
 
-val_layer <- subset(prediction, 'validation')
-val_poly <- as.polygons(val_layer)
-plot(val_poly)
+maxar_val_polys_ls <- maxar_preds %>%
+  map(~ val_as_poly(.x))
+```
 
-subset(prediction, 'validation')
-plot(subset(prediction, 'validation'))
+### Planet
+
+```{r}
+planet_val_polys <- planet_preds %>%
+  map_dfr(~ val_as_poly(.x)) %>%
+  mutate(imagery = 'planet')
+
+planet_val_polys_ls <- planet_preds %>%
+  map(~ val_as_poly(.x))
+```
+
+### Sentinel
+
+```{r}
+sentinel_val_polys <- sentinel_preds %>%
+  map_dfr(~ val_as_poly(.x)) %>%
+  mutate(imagery = 'sentinel')
+
+sentinel_val_polys_ls <- sentinel_preds %>%
+  map(~ val_as_poly(.x))
+```
+
+### Join Polygons into One SF Dataframe
+
+```{r}
+val_polys <- maxar_val_polys %>%
+  rbind(planet_val_polys) %>%
+  rbind(sentinel_val_polys)
+```
+
+## IoU
+
+```{r}
+custom_intersection <- function(pred, val) {
+  
+  val <- val %>%
+    select(geometry)
+  
+  intersection <- pred %>%
+    st_intersection(val)
+  print(intersection)
+  
+  union <- pred %>%
+  st_union(val)
+  print(union)
+  
+  iou <- st_area(intersection)/st_area(union)
+  print(iou)
+  
+  return(iou)
+}
+```
+
+```{r}
+intersection <- map2_dfr(maxar_pred_polys_ls, maxar_val_polys_ls,
+                         ~ custom_intersection(.x, .y))
+
+# pred <- maxar_pred_polys_ls[[1]]
+# val <- maxar_val_polys_ls[[1]]
+# intersection_area <- pred %>%
+#   st_intersection(val) %>%
+#   st_area()
+# union_area <- pred %>%
+#   st_union(val) %>%
+#   st_area()
+# 
+# iou <- intersection_area/union_area
+# iou
+# 
+# plot(pred)
+# plot(val)
+
+```
+
+```{r}
+maxar_preds[[1]]
 ```
 
 ## Plot
@@ -432,5 +471,9 @@ leaflet() %>%
               weight = 2) %>%
   addLegend(data = pred_polys, 
             pal = pal_viridis, 
-            values = ~ imagery)
+            values = ~ imagery) %>%
+  addPolygons(data = val_polys, 
+              color = 'black',
+              fill = FALSE,
+              weight = 2)
 ```
