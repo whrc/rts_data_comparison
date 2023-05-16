@@ -7,10 +7,9 @@ output:
 
 ## TODO:
 
--   get authorization to work consistently
 -   Figure out why there are multiple polygons for each imagery type and polygon.
--   Figure out why validation polygons won't convert to vector properly. The output looks like it is coming from the prediction layer not the validation layer.
--   Figure out which polygons the predictions were run for.
+-   Figure out which polygons the predictions were run for (plot predictions with polygon shapefiles to see which have predictions)
+-   Update file download to check for local file before attempting to download
 
 ## Load Libraries
 
@@ -284,15 +283,21 @@ pred_as_poly <- function(prediction) {
   layer <- prediction[['prediction']]
   layer[layer >= 0.5] <- 1
   layer[layer < 0.5] <- NA
-  return(
-    st_transform(
+  poly <- st_transform(
       st_as_sf(as.polygons(layer, values = FALSE)), 
-      crs = 4326
+      crs = 26901
     ) %>%
       mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
                                                             '/')[[1]]), 
                                              '\\.')[[1]])))
-  )
+  if (nrow(poly) == 0) {
+    poly <- st_sf(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
+                                                            '/')[[1]]), 
+                                             '\\.')[[1]])), 
+                  geometry = st_sfc(st_polygon(), crs = 26901))
+  }
+  
+  return(poly)
 }
 ```
 
@@ -357,15 +362,18 @@ val_as_poly <- function(prediction) {
                              1, 1),
                            ncol = 2,
                            byrow = TRUE))
-  return(
-    st_transform(
+  poly <- st_transform(
       st_as_sf(as.polygons(layer, values = FALSE)), 
-      crs = 4326
+      crs = 26901
     ) %>%
       mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
                                                             '/')[[1]]), 
                                              '\\.')[[1]])))
-  )
+  if (nrow(poly) == 0) {
+    poly <- st_sf(id = c(0), geometry = st_sfc(st_polygon(), crs = 26901))
+  }
+  
+  return(poly)
 }
 ```
 
@@ -410,52 +418,76 @@ val_polys <- maxar_val_polys %>%
   rbind(sentinel_val_polys)
 ```
 
+## Join Prediction and Validation Polygons
+```{r}
+polys <- pred_polys %>%
+  rename(pred_geometry = geometry) %>%
+  as_tibble() %>%
+  full_join(val_polys %>%
+              rename(val_geometry = geometry) %>%
+              as_tibble(),
+            by = c('id', 'imagery')) %>%
+  st_as_sf(crs = 26901)
+```
+
 ## IoU
+### Calculate Intersection
 
 ```{r}
-custom_intersection <- function(pred, val) {
-  
-  val <- val %>%
-    select(geometry)
-  
-  intersection <- pred %>%
-    st_intersection(val)
-  print(intersection)
-  
-  union <- pred %>%
-  st_union(val)
-  print(union)
-  
-  iou <- st_area(intersection)/st_area(union)
-  print(iou)
-  
-  return(iou)
-}
+intersection <- st_intersection(pred_polys, val_polys)
+intersection <- intersection %>%
+  filter(id == id.1 & imagery == imagery.1) %>%
+  select(id, imagery, int_geometry = geometry)
+```
+
+### Calculate Union
+
+```{r}
+union <- st_union(pred_polys, val_polys)
+union <- union %>%
+  filter(id == id.1 & imagery == imagery.1) %>%
+  select(id, imagery, uni_geometry = geometry)
+```
+
+### Join Back to Polys
+
+```{r}
+polys <- polys %>%
+  as_tibble() %>%
+  full_join(intersection %>%
+              as_tibble(),
+            by = c('id', 'imagery')) %>%
+  full_join(union %>%
+              as_tibble(),
+            by = c('id', 'imagery')) %>%
+  st_as_sf(crs = 26901)
+```
+
+### Calculate IoU
+
+```{r}
+polys <- polys %>%
+  mutate(iou = round(as.numeric(st_area(int_geometry)/st_area(uni_geometry)), 2))
 ```
 
 ```{r}
-intersection <- map2_dfr(maxar_pred_polys_ls, maxar_val_polys_ls,
-                         ~ custom_intersection(.x, .y))
+maxar_iou <- polys %>%
+  as_tibble() %>%
+  filter(imagery == 'maxar') %>%
+  summarise(iou = mean(iou)) %>%
+  as.numeric()
 
-# pred <- maxar_pred_polys_ls[[1]]
-# val <- maxar_val_polys_ls[[1]]
-# intersection_area <- pred %>%
-#   st_intersection(val) %>%
-#   st_area()
-# union_area <- pred %>%
-#   st_union(val) %>%
-#   st_area()
-# 
-# iou <- intersection_area/union_area
-# iou
-# 
-# plot(pred)
-# plot(val)
+planet_iou <- polys %>%
+  as_tibble() %>%
+  filter(imagery == 'planet') %>%
+  summarise(iou = mean(iou)) %>%
+  as.numeric()
 
-```
-
-```{r}
-maxar_preds[[1]]
+sentinel_iou <- polys %>%
+  as_tibble() %>%
+  filter(imagery == 'sentinel') %>%
+  summarise(iou = mean(iou)) %>%
+  as.numeric()
 ```
 
 ## Plot
