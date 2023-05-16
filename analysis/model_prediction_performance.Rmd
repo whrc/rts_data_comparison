@@ -430,6 +430,26 @@ polys <- pred_polys %>%
   st_as_sf(crs = 26901)
 ```
 
+## Interactive Map of Features
+
+```{r}
+pal_viridis <- colorFactor("viridis", pred_polys$imagery)
+
+leaflet() %>%
+  addProviderTiles('Esri.WorldImagery') %>%
+  addPolygons(data = pred_polys, 
+              color = ~ pal_viridis(imagery),
+              fill = FALSE,
+              weight = 2) %>%
+  addLegend(data = pred_polys, 
+            pal = pal_viridis, 
+            values = ~ imagery) %>%
+  addPolygons(data = val_polys, 
+              color = 'black',
+              fill = FALSE,
+              weight = 2)
+```
+
 ## IoU
 ### Calculate Intersection
 
@@ -490,22 +510,48 @@ sentinel_iou <- polys %>%
   as.numeric()
 ```
 
-## Plot
+## Performance by Feature Size
+### Calculate Area
 
 ```{r}
-pal_viridis <- colorFactor("viridis", pred_polys$imagery)
+polys <- polys %>%
+  mutate(rts_area = round(as.numeric(st_area(val_geometry)), 2),
+         rts_area_class = round(rts_area, -2))
 
-leaflet() %>%
-  addProviderTiles('Esri.WorldImagery') %>%
-  addPolygons(data = pred_polys, 
-              color = ~ pal_viridis(imagery),
-              fill = FALSE,
-              weight = 2) %>%
-  addLegend(data = pred_polys, 
-            pal = pal_viridis, 
-            values = ~ imagery) %>%
-  addPolygons(data = val_polys, 
-              color = 'black',
-              fill = FALSE,
-              weight = 2)
+poly_size_summary <- polys %>%
+  group_by(imagery, rts_area_class) %>%
+  summarise(iou_mean = mean(iou),
+            iou_se = sd(iou)/sqrt(n()))
+```
+
+### Plot
+
+```{r}
+ggplot(polys, aes(x = rts_area, y = iou, color = imagery)) +
+  geom_point() +
+  geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs")) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'IoU') +
+  scale_color_manual(values = c('#FFCC00', '#0099AA', '#0000AA'),
+                     labels = c('Maxar', 'Planet', 'Sentinel-2')) +
+  theme_bw() +
+  theme(legend.title = element_blank()) + 
+  coord_cartesian(ylim = c(0, 1)) 
+```
+
+```{r}
+ggplot(poly_size_summary, 
+       aes(x = rts_area_class, y = iou_mean, color = imagery)) +
+  geom_point() +
+  # geom_errorbar(aes(ymin = iou_mean - iou_se, ymax = iou_mean + iou_se)) +
+  geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs")) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'IoU') +
+  scale_color_manual(values = c('#FFCC00', '#0099AA', '#0000AA'),
+                     labels = c('Maxar', 'Planet', 'Sentinel-2')) +
+  scale_fill_manual(values = c('#FFCC00', '#0099AA', '#0000AA'),
+                     labels = c('Maxar', 'Planet', 'Sentinel-2')) +
+  theme_bw() +
+  theme(legend.title = element_blank()) + 
+  coord_cartesian(ylim = c(0, 1)) 
 ```
