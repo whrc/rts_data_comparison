@@ -11,6 +11,7 @@ output:
 -   Figure out which polygons the predictions were run for (plot predictions with polygon shapefiles to see which have predictions)
 -   Update file download to check for local file before attempting to download
 
+
 ## Load Libraries
 
 ```{r, include = FALSE}
@@ -23,13 +24,16 @@ library(jsonlite)
 library(tidyverse)
 ```
 
+
 ## Prep Google Drive Authentication
 
 ```{r, include = FALSE}
 drive_auth(email = 'hrodenhizer@woodwellclimate.org')
 ```
 
-## Load Data
+
+## Define Functions
+### make_my_dir
 
 ```{r, include = FALSE}
 make_my_dir <- function(output_dir) {
@@ -41,48 +45,102 @@ make_my_dir <- function(output_dir) {
 }
 ```
 
+### rast_from_googledrive
+
 ```{r, include = FALSE}
 rast_from_googledrive <- function(name, id, drive_resource, directory) {
   current <- as_dribble(id)
   make_my_dir(directory)
   filepath = paste0(directory, name)
-  print(filepath)
-  try(dl <- drive_download(
-    current,
-    path = filepath,
-    overwrite = FALSE))
+  
+  if (!file.exists(filepath)) {
+    print(filepath)
+    dl <- drive_download(
+      current,
+      path = filepath)
+  }
+  
   raster <- rast(filepath)
   names(raster) <- c('prediction', 'validation')
   return(raster)
 }
 ```
 
+### json_from_googledrive
+
 ```{r, include = FALSE}
 json_from_googledrive <- function(name, id, drive_resource, directory) {
   current <- as_dribble(id)
   make_my_dir(directory)
   filepath = paste0(directory, name)
-  try(dl <- drive_download(
-    current,
-    path = filepath,
-    overwrite = FALSE),
-    silent = TRUE)
+  
+  if (!file.exists(filepath)) {
+    dl <- drive_download(
+      current,
+      path = filepath)
+  }
+  
   json <- fromJSON(txt = filepath)
   return(json)
 }
 ```
 
-### RTS Polygons
+### pred_as_poly
 
 ```{r, include = FALSE}
-
+pred_as_poly <- function(prediction) {
+  layer <- prediction[['prediction']]
+  layer[layer >= 0.5] <- 1
+  layer[layer < 0.5] <- NA
+  poly <- st_transform(
+      st_as_sf(as.polygons(layer, values = FALSE)), 
+      crs = 26901
+    ) %>%
+      mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
+                                                            '/')[[1]]), 
+                                             '\\.')[[1]])))
+  if (nrow(poly) == 0) {
+    poly <- st_sf(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
+                                                            '/')[[1]]), 
+                                             '\\.')[[1]])), 
+                  geometry = st_sfc(st_polygon(), crs = 26901))
+  }
+  
+  return(poly)
+}
 ```
 
+### val_as_poly
+
+```{r, include = FALSE}
+val_as_poly <- function(prediction) {
+  layer <- prediction[['validation']]
+  layer <- classify(layer, 
+                    matrix(c(0, NA,
+                             1, 1),
+                           ncol = 2,
+                           byrow = TRUE))
+  poly <- st_transform(
+      st_as_sf(as.polygons(layer, values = FALSE)), 
+      crs = 26901
+    ) %>%
+      mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
+                                                            '/')[[1]]), 
+                                             '\\.')[[1]])))
+  if (nrow(poly) == 0) {
+    poly <- st_sf(id = c(0), geometry = st_sfc(st_polygon(), crs = 26901))
+  }
+  
+  return(poly)
+}
+```
+
+
+## Load Data
 ### Maxar GeoTiffs
-
 #### 20220925-105508
-Parameters:
 
+Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1jUsWsjRPGSROwsT8ENHdsRhxen0p0FlN',
@@ -108,8 +166,8 @@ maxar_preds_1 <- maxar_pred_files %>%
 ```
 
 #### 20220925-105508-fixed
-Parameters:
 
+Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1HGSyxXaIoyGNY0nI6Rbqg7evPMZa_iAm',
@@ -134,10 +192,9 @@ maxar_preds_2 <- maxar_pred_files %>%
     )
 ```
 
-
 #### 20230317-181045
-Parameters:
 
+Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1QicQlzWuaMh-muI28FPz-TlwTybAcB8T',
@@ -162,11 +219,9 @@ maxar_preds_3 <- maxar_pred_files %>%
     )
 ```
 
-
-
 #### 20230426-213214
-Parameters:
 
+Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/10btUO5v9iLRRM0WM5hstBXgtfYEfSYGZ',
@@ -192,7 +247,6 @@ maxar_preds_4 <- maxar_pred_files %>%
 ```
 
 ### Planet GeoTiffs
-
 #### 20230411-102851
 
 Parameters:
@@ -248,7 +302,6 @@ planet_preds_2 <- planet_pred_files %>%
 ```
 
 ### Sentinel GeoTiffs
-
 #### 20220923-131534
 
 Parameters:
@@ -276,30 +329,8 @@ sentinel_preds_1 <- sentinel_pred_files %>%
     )
 ```
 
-## Convert Predictions to Vector
 
-```{r}
-pred_as_poly <- function(prediction) {
-  layer <- prediction[['prediction']]
-  layer[layer >= 0.5] <- 1
-  layer[layer < 0.5] <- NA
-  poly <- st_transform(
-      st_as_sf(as.polygons(layer, values = FALSE)), 
-      crs = 26901
-    ) %>%
-      mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
-                                                            '/')[[1]]), 
-                                             '\\.')[[1]])))
-  if (nrow(poly) == 0) {
-    poly <- st_sf(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
-                                                            '/')[[1]]), 
-                                             '\\.')[[1]])), 
-                  geometry = st_sfc(st_polygon(), crs = 26901))
-  }
-  
-  return(poly)
-}
-```
+## Convert Predictions to Vector
 
 For now, use this to choose which version of the model output to use.
 ```{r}
@@ -310,7 +341,7 @@ sentinel_preds <- sentinel_preds_1
 
 ### Maxar
 
-```{r}
+```{r, echo = FALSE}
 maxar_pred_polys <- maxar_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
   mutate(imagery = 'maxar')
@@ -322,7 +353,7 @@ maxar_pred_polys_ls <- maxar_preds %>%
 
 ### Planet
 
-```{r}
+```{r, echo = FALSE}
 planet_pred_polys <- planet_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
   mutate(imagery = 'planet')
@@ -334,7 +365,7 @@ planet_pred_polys_ls <- planet_preds %>%
 
 ### Sentinel
 
-```{r}
+```{r, echo = FALSE}
 sentinel_pred_polys <- sentinel_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
   mutate(imagery = 'sentinel')
@@ -346,40 +377,17 @@ sentinel_pred_polys_ls <- sentinel_preds %>%
 
 
 ### Join Polygons into One SF Dataframe
-```{r}
+```{r, echo = FALSE}
 pred_polys <- maxar_pred_polys %>%
   rbind(planet_pred_polys) %>%
   rbind(sentinel_pred_polys)
 ```
 
+
 ## Convert Validation to Vector
-
-```{r}
-val_as_poly <- function(prediction) {
-  layer <- prediction[['validation']]
-  layer <- classify(layer, 
-                    matrix(c(0, NA,
-                             1, 1),
-                           ncol = 2,
-                           byrow = TRUE))
-  poly <- st_transform(
-      st_as_sf(as.polygons(layer, values = FALSE)), 
-      crs = 26901
-    ) %>%
-      mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
-                                                            '/')[[1]]), 
-                                             '\\.')[[1]])))
-  if (nrow(poly) == 0) {
-    poly <- st_sf(id = c(0), geometry = st_sfc(st_polygon(), crs = 26901))
-  }
-  
-  return(poly)
-}
-```
-
 ### Maxar
 
-```{r}
+```{r, echo = FALSE}
 maxar_val_polys <- maxar_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
   mutate(imagery = 'maxar')
@@ -390,7 +398,7 @@ maxar_val_polys_ls <- maxar_preds %>%
 
 ### Planet
 
-```{r}
+```{r, echo = FALSE}
 planet_val_polys <- planet_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
   mutate(imagery = 'planet')
@@ -401,7 +409,7 @@ planet_val_polys_ls <- planet_preds %>%
 
 ### Sentinel
 
-```{r}
+```{r, echo = FALSE}
 sentinel_val_polys <- sentinel_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
   mutate(imagery = 'sentinel')
@@ -412,14 +420,15 @@ sentinel_val_polys_ls <- sentinel_preds %>%
 
 ### Join Polygons into One SF Dataframe
 
-```{r}
+```{r, echo = FALSE}
 val_polys <- maxar_val_polys %>%
   rbind(planet_val_polys) %>%
   rbind(sentinel_val_polys)
 ```
 
+
 ## Join Prediction and Validation Polygons
-```{r}
+```{r, echo = FALSE}
 polys <- pred_polys %>%
   rename(pred_geometry = geometry) %>%
   as_tibble() %>%
@@ -430,30 +439,34 @@ polys <- pred_polys %>%
   st_as_sf(crs = 26901)
 ```
 
+
 ## Interactive Map of Features
 
-```{r}
+```{r, echo = FALSE}
 pal_viridis <- colorFactor("viridis", pred_polys$imagery)
 
 leaflet() %>%
   addProviderTiles('Esri.WorldImagery') %>%
-  addPolygons(data = pred_polys, 
+  addPolygons(data = pred_polys %>%
+                st_transform(crs = 4326), 
               color = ~ pal_viridis(imagery),
               fill = FALSE,
               weight = 2) %>%
   addLegend(data = pred_polys, 
             pal = pal_viridis, 
             values = ~ imagery) %>%
-  addPolygons(data = val_polys, 
+  addPolygons(data = val_polys %>%
+                st_transform(crs = 4326), 
               color = 'black',
               fill = FALSE,
               weight = 2)
 ```
 
+
 ## IoU
 ### Calculate Intersection
 
-```{r}
+```{r, echo = FALSE}
 intersection <- st_intersection(pred_polys, val_polys)
 intersection <- intersection %>%
   filter(id == id.1 & imagery == imagery.1) %>%
@@ -462,7 +475,7 @@ intersection <- intersection %>%
 
 ### Calculate Union
 
-```{r}
+```{r, echo = FALSE}
 union <- st_union(pred_polys, val_polys)
 union <- union %>%
   filter(id == id.1 & imagery == imagery.1) %>%
@@ -471,7 +484,7 @@ union <- union %>%
 
 ### Join Back to Polys
 
-```{r}
+```{r, echo = FALSE}
 polys <- polys %>%
   as_tibble() %>%
   full_join(intersection %>%
@@ -485,12 +498,12 @@ polys <- polys %>%
 
 ### Calculate IoU
 
-```{r}
+```{r, echo = FALSE}
 polys <- polys %>%
   mutate(iou = round(as.numeric(st_area(int_geometry)/st_area(uni_geometry)), 2))
 ```
 
-```{r}
+```{r, echo = FALSE}
 maxar_iou <- polys %>%
   as_tibble() %>%
   filter(imagery == 'maxar') %>%
@@ -509,11 +522,16 @@ sentinel_iou <- polys %>%
   summarise(iou = mean(iou)) %>%
   as.numeric()
 ```
+Maxar IoU: `r maxar_iou`
+
+Planet IoU: `r planet_iou`
+
+Sentinel-2 IoU: `r sentinel_iou`
 
 ## Performance by Feature Size
 ### Calculate Area
 
-```{r}
+```{r, echo = FALSE}
 polys <- polys %>%
   mutate(rts_area = round(as.numeric(st_area(val_geometry)), 2),
          rts_area_class = round(rts_area, -2))
@@ -526,7 +544,9 @@ poly_size_summary <- polys %>%
 
 ### Plot
 
-```{r}
+Raw IoU Scores:
+
+```{r, echo = FALSE}
 ggplot(polys, aes(x = rts_area, y = iou, color = imagery)) +
   geom_point() +
   geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs")) +
@@ -539,7 +559,9 @@ ggplot(polys, aes(x = rts_area, y = iou, color = imagery)) +
   coord_cartesian(ylim = c(0, 1)) 
 ```
 
-```{r}
+Binned IoU Scores:
+
+```{r, echo = FALSE}
 ggplot(poly_size_summary, 
        aes(x = rts_area_class, y = iou_mean, color = imagery)) +
   geom_point() +
