@@ -1,6 +1,7 @@
 # Project specific
 data/
 *.html
+*.qgz
 
 # History files
 .Rhistory
