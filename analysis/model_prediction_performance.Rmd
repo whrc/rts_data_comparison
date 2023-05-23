@@ -130,7 +130,60 @@ val_as_poly <- function(prediction, rts_poly) {
 }
 ```
 
+### avg_precision
+This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
 
+```{r}
+avg_precision <- function(truth, iou, thresholds) {
+  
+  df <- tibble(ground_truth = truth,
+               iou_score = iou)
+  precision <- c()
+  recall <- c()
+  
+  for (threshold in thresholds) {
+    pred_class <- if_else(iou >= threshold,
+                          'positive',
+                          'negative')
+    
+    df <- df %>%
+      mutate(class = case_when(iou_score >= threshold & ground_truth == 1 ~ 'true positive',
+                               iou_score >= threshold & ground_truth == 0 ~ 'false positive',
+                               iou_score < threshold & ground_truth == 1 ~ 'false negative',
+                               iou_score < threshold & ground_truth == 0 ~ 'true negative'))
+    
+    # precision = count(true positive)/(count(true positive) + count(false positive))
+    precision <- c(precision,
+                   (
+                     nrow(df %>%
+                            filter(class == 'true positive')) /
+                       (nrow(df %>%
+                               filter(class == 'true positive')) 
+                        + nrow(df %>%
+                                 filter(class == 'false positive')))
+                   )
+    )
+    
+    # recall = count(true positive)/(count(true positive) + count(false negative))
+    recall <- c(recall,
+                   (
+                     nrow(df %>%
+                            filter(class == 'true positive')) /
+                       (nrow(df %>%
+                               filter(class == 'true positive')) 
+                        + nrow(df %>%
+                                 filter(class == 'false negative')))
+                   )
+    )
+    
+  }
+  
+  recall <- c(recall, 0)
+  ap <- sum((recall[1:length(recall) - 1] - recall[2:length(recall)])*precision, na.rm = TRUE)
+  return(ap)
+  
+}
+```
 ## Load Data
 ### Polygons
 
@@ -533,37 +586,13 @@ Sentinel-2 IoU: `r sentinel_iou`
 ## Mean Average Precision
 
 ```{r}
-ap <- function(truth, iou, thresholds) {
-  
-  df <- tibble(ground_truth = truth,
-               iou_score = iou)
-  precision <- c()
-  recall <- c()
-  
-  for (threshold in thresholds) {
-    print(threshold)
-    pred_class <- if_else(iou >= threshold,
-                          'positive',
-                          'negative')
-    
-    df <- df %>%
-      mutate(class = case_when(iou_score >= threshold & ground_truth == 1 ~ 'true positive',
-                               iou_score >= threshold & ground_truth == 0 ~ 'false positive',
-                               iou_score < threshold & ground_truth == 1 ~ 'false negative',
-                               iou_score < threshold & ground_truth == 0 ~ 'true negative'))
-    print(df)
+polys <- polys %>%
+  mutate(ground_truth = 1)
 
-    # precision <- c(precision, length(class[class == 'positive'])/)
-    # recall <- c(recall, )
-    
-  }
-}
+thresholds <- seq(0.2, 0.8, by = 0.1)
 
-truth <- rep(1, 3)
-iou <- c(0.33, 0.50, 0.62)
-thresholds <- c(0.2, 0.5)
-
-ap(truth, iou, thresholds)
+map <- avg_precision(polys$ground_truth, polys$iou, thresholds)
+map
 ```
 
 ## Performance by Feature Size
