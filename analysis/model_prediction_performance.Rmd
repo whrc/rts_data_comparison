@@ -21,6 +21,7 @@ library(leaflet)
 library(viridis)
 library(googledrive)
 library(jsonlite)
+library(emmeans)
 library(tidyverse)
 ```
 
@@ -133,7 +134,7 @@ val_as_poly <- function(prediction, rts_poly) {
 ### avg_precision
 This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
 
-```{r}
+```{r, echo = FALSE}
 avg_precision <- function(truth, iou, thresholds) {
   
   df <- tibble(ground_truth = truth,
@@ -184,12 +185,20 @@ avg_precision <- function(truth, iou, thresholds) {
   
 }
 ```
+
+## Prep Plot Variables
+```{r, echo = FALSE}
+imagery_labels <- c('Maxar', 'Planet', 'Sentinel-2')
+imagery_labeller <- c('maxar' = 'Maxar', 'planet' = 'Planet', 'sentinel' = 'Sentinel-2')
+imagery_colors <- c('#FFCC00', '#0099AA', '#0000AA')
+```
+
 ## Load Data
 ### Polygons
 
 ```{r, echo = FALSE}
 rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022.shp') %>%
-  st_transform(crs = 26901)
+  st_transform(crs = 3413)
 ```
 
 ### Maxar GeoTiffs
@@ -548,7 +557,7 @@ polys <- polys %>%
   full_join(union %>%
               as_tibble(),
             by = c('id', 'imagery')) %>%
-  st_as_sf(crs = 26901)
+  st_as_sf(crs = st_crs(polys))
 ```
 
 ### Calculate IoU
@@ -577,6 +586,7 @@ sentinel_iou <- polys %>%
   summarise(iou = mean(iou)) %>%
   as.numeric()
 ```
+
 Maxar IoU: `r maxar_iou`
 
 Planet IoU: `r planet_iou`
@@ -585,15 +595,30 @@ Sentinel-2 IoU: `r sentinel_iou`
 
 ## Mean Average Precision
 
-```{r}
+```{r, echo = FALSE}
 polys <- polys %>%
   mutate(ground_truth = 1)
 
 thresholds <- seq(0.2, 0.8, by = 0.1)
 
-map <- avg_precision(polys$ground_truth, polys$iou, thresholds)
-map
+maxar_map <- avg_precision(filter(polys, imagery == 'maxar')$ground_truth, 
+                           filter(polys, imagery == 'maxar')$iou, 
+                           thresholds)
+
+planet_map <- avg_precision(filter(polys, imagery == 'planet')$ground_truth, 
+                           filter(polys, imagery == 'planet')$iou, 
+                           thresholds)
+
+sentinel_map <- avg_precision(filter(polys, imagery == 'sentinel')$ground_truth, 
+                           filter(polys, imagery == 'sentinel')$iou, 
+                           thresholds)
 ```
+
+Maxar MAP: `r maxar_map`
+
+Planet MAP: `r planet_map`
+
+Sentinel-2 MAP: `r sentinel_map`
 
 ## Performance by Feature Size
 ### Calculate Area
@@ -615,12 +640,12 @@ Raw IoU Scores:
 
 ```{r, echo = FALSE}
 ggplot(polys, aes(x = rts_area, y = iou, color = imagery)) +
-  geom_point() +
+  geom_point(size = 1) +
   geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs")) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'IoU') +
-  scale_color_manual(values = c('#FFCC00', '#0099AA', '#0000AA'),
-                     labels = c('Maxar', 'Planet', 'Sentinel-2')) +
+  scale_color_manual(values = imagery_colors,
+                     labels = imagery_labels) +
   theme_bw() +
   theme(legend.title = element_blank()) + 
   coord_cartesian(ylim = c(0, 1)) 
@@ -631,16 +656,123 @@ Binned IoU Scores:
 ```{r, echo = FALSE}
 ggplot(poly_size_summary, 
        aes(x = rts_area_class, y = iou_mean, color = imagery)) +
-  geom_point() +
+  geom_point(size = 1) +
   # geom_errorbar(aes(ymin = iou_mean - iou_se, ymax = iou_mean + iou_se)) +
   geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs")) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'IoU') +
-  scale_color_manual(values = c('#FFCC00', '#0099AA', '#0000AA'),
-                     labels = c('Maxar', 'Planet', 'Sentinel-2')) +
-  scale_fill_manual(values = c('#FFCC00', '#0099AA', '#0000AA'),
-                     labels = c('Maxar', 'Planet', 'Sentinel-2')) +
+  scale_color_manual(values = imagery_colors,
+                     labels = imagery_labels) +
+  scale_fill_manual(values = imagery_colors,
+                     labels = imagery_labels) +
   theme_bw() +
   theme(legend.title = element_blank()) + 
   coord_cartesian(ylim = c(0, 1)) 
 ```
+
+## Active vs. General RTS Performance
+
+I need to figure out how to deal with polygons that are very close together and show up in the same tile, otherwise this join results in duplicates.
+```{r, echo = FALSE}
+polys <- polys %>%
+  st_set_geometry('val_geometry') %>%
+  st_join(rts_outlines) %>%
+  st_set_geometry('pred_geometry')
+```
+
+```{r, echo = FALSE}
+iou_by_rts_status <- polys %>%
+  as_tibble() %>%
+  group_by(imagery, Act_or_Gen) %>%
+  summarise(iou = mean(iou))
+```
+
+```{r, echo = FALSE}
+rts_status_lm <- lm(iou ~ imagery * Act_or_Gen,
+                             data = polys)
+rts_status_contrasts <- emmeans(rts_status_lm,
+        pairwise ~ Act_or_Gen | imagery,
+        adjust = 'tukey')
+rts_status_contrasts
+rts_status_pvalues <- tibble(
+  imagery = summary(rts_status_contrasts)$contrasts$imagery,
+  p_val = summary(rts_status_contrasts)$contrasts$p.value,
+  x_pos = rep(1.5, 3),
+  star_y_pos = rep(0.9, 3),
+  label_y_pos = rep(0.95, 3)
+) %>%
+  mutate(p_label = paste0('p-value = ', round(p_val, 3)),
+         star_label = case_when(p_val > 0.05 ~ '',
+                                p_val > 0.01 ~ '*',
+                                p_val > 0.001 ~ '**',
+                                p_val > 0.0001 ~ '***',
+                                TRUE ~ '****'))
+rts_status_pvalues
+```
+
+### Plot
+
+It is possible to get rid of the inner panel borders, if I decide that looks better: https://stackoverflow.com/questions/46220242/ggplot2-outside-panel-border-when-using-facet
+```{r, echo = FALSE}
+ggplot(polys, 
+       aes(x = Act_or_Gen, 
+           y = iou, 
+           group = interaction(imagery, Act_or_Gen))) +
+  geom_point(position = position_jitterdodge(seed = 1, dodge.width = 0.9, jitter.width = 0.5),
+             aes(color = imagery),
+             size = 1,
+             alpha = 0.1) +
+  geom_violin(aes(color = imagery),
+              fill = 'gray60',
+              linewidth = 0.75,
+              alpha = 0.4,
+              draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_text(data = rts_status_pvalues,
+            aes(x = x_pos, y = star_y_pos, label = star_label),
+            inherit.aes = FALSE) +
+  # geom_text(data = rts_status_pvalues,
+  #           aes(x = x_pos, y = label_y_pos, label = p_label),
+  #           inherit.aes = FALSE) +
+  scale_y_continuous(name = 'IoU') +
+  scale_color_manual(values = imagery_colors,
+                     labels = imagery_labels,
+                     guide = 'none') +
+  facet_wrap(~ imagery, 
+             strip.position = 'bottom', 
+             scales = 'free_x',
+             labeller = labeller(imagery = imagery_labeller)) +
+  theme_bw() +
+  theme(axis.title.x = element_blank(),
+        legend.title = element_blank(),
+        panel.spacing = unit(0, "lines"), 
+        strip.background = element_blank(),
+        strip.placement = "outside")
+```
+
+```{r, echo = FALSE}
+poly_status_size_summary <- polys %>%
+  group_by(imagery, Act_or_Gen, rts_area_class) %>%
+  summarise(iou_mean = mean(iou),
+            iou_se = sd(iou)/sqrt(n()))
+```
+
+```{r, echo = FALSE}
+ggplot(poly_status_size_summary, 
+       aes(x = rts_area_class, y = iou_mean, color = imagery)) +
+  geom_point(size = 2, aes(shape = Act_or_Gen)) +
+  # geom_errorbar(aes(ymin = iou_mean - iou_se, ymax = iou_mean + iou_se)) +
+  geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs"),
+              aes(linetype = Act_or_Gen)) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'IoU') +
+  scale_color_manual(values = imagery_colors,
+                     labels = imagery_labels) +
+  scale_fill_manual(values = imagery_colors,
+                     labels = imagery_labels) +
+  scale_shape_manual(values = c(16, 1)) +
+  facet_grid(imagery ~ .) +
+  theme_bw() +
+  theme(legend.title = element_blank()) + 
+  coord_cartesian(ylim = c(0, 1)) 
+```
+
