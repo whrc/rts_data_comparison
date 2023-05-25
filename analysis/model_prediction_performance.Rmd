@@ -131,11 +131,10 @@ val_as_poly <- function(prediction, rts_poly) {
 }
 ```
 
-### avg_precision
-This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
+### recall_precision
 
 ```{r, echo = FALSE}
-avg_precision <- function(truth, iou, thresholds) {
+recall_precision <- function(truth, iou, thresholds) {
   
   df <- tibble(ground_truth = truth,
                iou_score = iou)
@@ -180,7 +179,23 @@ avg_precision <- function(truth, iou, thresholds) {
   }
   
   recall <- c(recall, 0)
-  ap <- sum((recall[1:length(recall) - 1] - recall[2:length(recall)])*precision, na.rm = TRUE)
+  precision <- c(precision, 1)
+  
+  output <- tibble(recall = recall,
+                   precision = precision)
+  
+  return(output)
+  
+}
+```
+
+### avg_precision
+This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
+
+```{r, echo = FALSE}
+avg_precision <- function(df) {
+  
+  ap <- sum((df$recall[1:nrow(df) - 1] - df$recall[2:nrow(df)])*df$precision[1:nrow(df) - 1], na.rm = TRUE)
   return(ap)
   
 }
@@ -202,9 +217,8 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022.shp'
 ```
 
 ### Maxar GeoTiffs
-#### 20220925-105508
 
-Parameters:
+20220925-105508 Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1jUsWsjRPGSROwsT8ENHdsRhxen0p0FlN',
@@ -229,9 +243,7 @@ maxar_preds_1 <- maxar_pred_files %>%
     )
 ```
 
-#### 20220925-105508-fixed
-
-Parameters:
+20220925-105508-fixed Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1HGSyxXaIoyGNY0nI6Rbqg7evPMZa_iAm',
@@ -256,9 +268,7 @@ maxar_preds_2 <- maxar_pred_files %>%
     )
 ```
 
-#### 20230317-181045
-
-Parameters:
+20230317-181045 Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1QicQlzWuaMh-muI28FPz-TlwTybAcB8T',
@@ -283,9 +293,7 @@ maxar_preds_3 <- maxar_pred_files %>%
     )
 ```
 
-#### 20230426-213214
-
-Parameters:
+20230426-213214 Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/10btUO5v9iLRRM0WM5hstBXgtfYEfSYGZ',
@@ -311,9 +319,8 @@ maxar_preds_4 <- maxar_pred_files %>%
 ```
 
 ### Planet GeoTiffs
-#### 20230411-102851
 
-Parameters:
+20230411-102851 Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/15vdbvwgMh5RCnEzJekWY0_sVD4s4-fec',
@@ -338,9 +345,7 @@ planet_preds_1 <- planet_pred_files %>%
     )
 ```
 
-#### 20230411-102851-fixed
-
-Parameters:
+20230411-102851-fixed Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1Y28fskc7woYjZgh14xP-SBs-bKuG_PW0',
@@ -366,9 +371,8 @@ planet_preds_2 <- planet_pred_files %>%
 ```
 
 ### Sentinel GeoTiffs
-#### 20220923-131534
 
-Parameters:
+20220923-131534 Parameters:
 ```{r, echo = FALSE}
 # json metadata
 metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1HygGBu1WZatYv1ejU80nOynGkYQU0Rsg',
@@ -393,9 +397,6 @@ sentinel_preds_1 <- sentinel_pred_files %>%
     )
 ```
 
-
-## Convert Predictions to Vector
-
 For now, use this to choose which version of the model output to use.
 ```{r}
 maxar_preds <- maxar_preds_2
@@ -403,8 +404,9 @@ planet_preds <- planet_preds_2
 sentinel_preds <- sentinel_preds_1
 ```
 
-### Maxar
+## Convert Predictions to Vector
 
+Maxar
 ```{r, echo = FALSE}
 maxar_pred_polys <- maxar_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
@@ -415,8 +417,7 @@ maxar_pred_polys_ls <- maxar_preds %>%
         mutate(imagery = 'maxar'))
 ```
 
-### Planet
-
+Planet
 ```{r, echo = FALSE}
 planet_pred_polys <- planet_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
@@ -427,8 +428,7 @@ planet_pred_polys_ls <- planet_preds %>%
         mutate(imagery = 'planet'))
 ```
 
-### Sentinel
-
+Sentinel
 ```{r, echo = FALSE}
 sentinel_pred_polys <- sentinel_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
@@ -439,8 +439,7 @@ sentinel_pred_polys_ls <- sentinel_preds %>%
         mutate(imagery = 'sentinel'))
 ```
 
-
-### Join Polygons into One SF Dataframe
+Join Polygons into One SF Dataframe
 ```{r, echo = FALSE}
 pred_polys <- maxar_pred_polys %>%
   rbind(planet_pred_polys) %>%
@@ -449,8 +448,8 @@ pred_polys <- maxar_pred_polys %>%
 
 
 ## Convert Validation to Vector
-### Maxar
 
+Maxar
 ```{r, echo = FALSE}
 maxar_val_polys <- maxar_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
@@ -460,8 +459,7 @@ maxar_val_polys_ls <- maxar_preds %>%
   map(~ val_as_poly(.x))
 ```
 
-### Planet
-
+Planet
 ```{r, echo = FALSE}
 planet_val_polys <- planet_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
@@ -471,8 +469,7 @@ planet_val_polys_ls <- planet_preds %>%
   map(~ val_as_poly(.x))
 ```
 
-### Sentinel
-
+Sentinel
 ```{r, echo = FALSE}
 sentinel_val_polys <- sentinel_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
@@ -482,8 +479,7 @@ sentinel_val_polys_ls <- sentinel_preds %>%
   map(~ val_as_poly(.x))
 ```
 
-### Join Polygons into One SF Dataframe
-
+Join Polygons into One SF Dataframe
 ```{r, echo = FALSE}
 val_polys <- maxar_val_polys %>%
   rbind(planet_val_polys) %>%
@@ -492,6 +488,7 @@ val_polys <- maxar_val_polys %>%
 
 
 ## Join Prediction and Validation Polygons
+
 ```{r, echo = FALSE}
 polys <- pred_polys %>%
   rename(pred_geometry = geometry) %>%
@@ -594,24 +591,49 @@ Planet IoU: `r planet_iou`
 Sentinel-2 IoU: `r sentinel_iou`
 
 ## Mean Average Precision
-
+### Recall-Precision Curves
 ```{r, echo = FALSE}
 polys <- polys %>%
   mutate(ground_truth = 1)
 
 thresholds <- seq(0.2, 0.8, by = 0.1)
 
-maxar_map <- avg_precision(filter(polys, imagery == 'maxar')$ground_truth, 
+maxar_rec_pre <- recall_precision(filter(polys, imagery == 'maxar')$ground_truth, 
                            filter(polys, imagery == 'maxar')$iou, 
                            thresholds)
 
-planet_map <- avg_precision(filter(polys, imagery == 'planet')$ground_truth, 
+planet_rec_pre <- recall_precision(filter(polys, imagery == 'planet')$ground_truth, 
                            filter(polys, imagery == 'planet')$iou, 
                            thresholds)
 
-sentinel_map <- avg_precision(filter(polys, imagery == 'sentinel')$ground_truth, 
+sentinel_rec_pre <- recall_precision(filter(polys, imagery == 'sentinel')$ground_truth, 
                            filter(polys, imagery == 'sentinel')$iou, 
                            thresholds)
+
+rec_pre <- maxar_rec_pre %>%
+  mutate(imagery = 'maxar') %>%
+  rbind.data.frame(planet_rec_pre %>%
+                     mutate(imagery = 'planet')) %>%
+  rbind.data.frame(sentinel_rec_pre %>%
+                     mutate(imagery = 'sentinel'))
+```
+
+### MAP
+
+```{r, echo = FALSE}
+maxar_map <- avg_precision(maxar_rec_pre)
+planet_map <- avg_precision(planet_rec_pre)
+sentinel_map <- avg_precision(sentinel_rec_pre)
+
+map_values <- tibble(x_loc = rep(0, 3),
+                     y_loc = seq(0.2, 0, length.out = 3),
+                     imagery = imagery_labels,
+                     map = c(maxar_map,
+                             planet_map,
+                             sentinel_map)) %>%
+  mutate(map_label = paste(imagery, '=', round(map, 2)))
+
+rm(maxar_rec_pre, planet_rec_pre, sentinel_rec_pre)
 ```
 
 Maxar MAP: `r maxar_map`
@@ -619,6 +641,53 @@ Maxar MAP: `r maxar_map`
 Planet MAP: `r planet_map`
 
 Sentinel-2 MAP: `r sentinel_map`
+
+### Plot
+Precision measures false positives.
+Recall measures false negatives.
+```{r, echo = FALSE}
+arrow_data <- tibble(x = c(0.5, -0.28),
+                     xend = c(1, -0.28),
+                     y = c(-0.24, 0.5),
+                     yend = c(-0.24, 1))
+label_data <- tibble(x = c(0.5, -0.28),
+                     y = c(-0.24, 0.5),
+                     label = c('Fewer False Negatives    ',
+                               'Fewer False Positives    '),
+                     angle = c(0, 90))
+
+rec_pre_plot <- ggplot(rec_pre,
+                       aes(x = recall, y = precision, color = imagery)) +
+  geom_line() +
+  geom_text(data = map_values,
+            aes(x = x_loc, y = y_loc, label = map_label),
+            inherit.aes = FALSE,
+            hjust = 0,
+            vjust = 0) +
+  geom_segment(data = arrow_data,
+               aes(x = x, y = y,
+                   xend = xend, yend = yend),
+               inherit.aes = FALSE,
+               arrow = arrow(type = 'closed', length = unit(0.02, 'npc'))) +
+  geom_text(data = label_data,
+            aes(x = x, y = y, label = label, angle = angle),
+            inherit.aes = FALSE,
+            size = 3.5,
+            hjust = 1,
+            vjust = 0.4,
+            color = 'black') +
+  scale_x_continuous(name = 'Recall') +
+  scale_y_continuous(name = 'Precision') +
+  scale_color_manual(labels = imagery_labels,
+                     values = imagery_colors) +
+  coord_fixed(xlim = c(0, 1),
+                  ylim = c(0, 1),
+                  clip = 'off') +
+  theme_bw() +
+  theme(legend.title = element_blank(),
+        plot.margin = margin(t = 5.5, r = 5.5, b = 30, l = 30, unit = 'pt'))
+rec_pre_plot
+```
 
 ## Performance by Feature Size
 ### Calculate Area
@@ -713,12 +782,15 @@ rts_status_pvalues
 ### Plot
 
 It is possible to get rid of the inner panel borders, if I decide that looks better: https://stackoverflow.com/questions/46220242/ggplot2-outside-panel-border-when-using-facet
+
 ```{r, echo = FALSE}
 ggplot(polys, 
        aes(x = Act_or_Gen, 
            y = iou, 
            group = interaction(imagery, Act_or_Gen))) +
-  geom_point(position = position_jitterdodge(seed = 1, dodge.width = 0.9, jitter.width = 0.5),
+  geom_point(position = position_jitterdodge(seed = 1, 
+                                             dodge.width = 0.9, 
+                                             jitter.width = 0.5),
              aes(color = imagery),
              size = 1,
              alpha = 0.1) +
