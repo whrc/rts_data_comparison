@@ -17,10 +17,12 @@ output:
 ```{r, include = FALSE}
 library(terra)
 library(sf)
+library(spData)
 library(leaflet)
 library(viridis)
 library(googledrive)
 library(jsonlite)
+library(smoothr)
 library(emmeans)
 library(tidyverse)
 ```
@@ -701,6 +703,51 @@ poly_size_summary <- polys %>%
   group_by(imagery, rts_area_class) %>%
   summarise(iou_mean = mean(iou),
             iou_se = sd(iou)/sqrt(n()))
+```
+
+### Size Distribution by Region
+
+```{r}
+sf_use_s2(FALSE)
+arctic_box <- tibble(lon = c(-180,180,180,-180,-180),
+                    lat = c(90,90,50,50,90)) %>%
+  st_as_sf(coords = c("lon","lat"),
+           crs = "EPSG:4326") %>%
+  summarise(geometry = st_combine(geometry)) %>%
+  st_cast("POLYGON") %>% 
+  smoothr::densify(max_distance = 1)
+
+world_north <- world %>%
+  st_crop(arctic_box) %>%
+  st_transform(crs = st_crs(rts_outlines)) %>%
+  select(name_long, continent, region_un, subregion)
+
+world_north_buffer <- world_north %>%
+  st_buffer(50000)
+
+if (!('name_long' %in% colnames(rts_outlines))) {
+  
+  rts_outlines <- rts_outlines %>%
+  st_join(world_north_buffer)
+  
+}
+
+# ggplot() +
+#   geom_sf(data = world_north, fill = 'transparent') +
+#   geom_sf(data = rts_outlines, 
+#           aes(color = name_long),
+#           linewidth = 1)
+```
+
+```{r}
+ggplot(rts_outlines, aes(x = Shape_Area, fill = name_long)) +
+  geom_histogram(position = position_dodge(), bins = 15) +
+  scale_fill_manual(labels = c('Canada', 'Russia'),
+                     values = c('gray50', 'gray20')) +
+  scale_x_log10(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'Count') +
+  theme_bw() +
+  theme(legend.title = element_blank())
 ```
 
 ### Plot
