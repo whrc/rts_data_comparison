@@ -7,9 +7,7 @@ output:
 
 ## TODO:
 
--   Figure out why there are multiple polygons for each imagery type and polygon.
--   Figure out which polygons the predictions were run for (plot predictions with polygon shapefiles to see which have predictions)
--   Update file download to check for local file before attempting to download
+-   Fix duplication issue when I get polygon IDs.
 
 
 ## Load Libraries
@@ -749,6 +747,38 @@ ggplot(rts_outlines, aes(x = Shape_Area, fill = name_long)) +
   theme_bw() +
   theme(legend.title = element_blank())
 ```
+
+```{r}
+rts_outlines <- rts_outlines %>%
+  mutate(yg = ifelse(Long > 67 & Long < 70,
+                     'yg',
+                     'other'))
+
+# ggplot(rts_outlines %>%
+#          filter(name_long == 'Russian Federation')) +
+#   geom_sf(aes(color = yg),
+#           linewidth = 1)
+```
+
+```{r}
+rts_summaries <- rts_outlines %>%
+  group_by(yg) %>%
+  summarise(mean_size = mean(Shape_Area),
+            min_size = min(Shape_Area),
+            max_size = max(Shape_Area),
+            median_size = median(Shape_Area))
+rts_summaries
+
+ggplot(rts_outlines, aes(x = Shape_Area, fill = yg)) +
+  geom_histogram(position = position_dodge(), bins = 15) +
+  scale_fill_manual(labels = c('Other', 'YG'),
+                     values = c('gray50', 'gray20')) +
+  scale_x_log10(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'Count') +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
 
 ### Plot
 
