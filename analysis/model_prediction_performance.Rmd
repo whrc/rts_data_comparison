@@ -3,12 +3,13 @@ output:
   html_document: default
   pdf_document: default
 ---
+
 # RTS Model V2 Performance Analysis
 
 ## TODO:
 
+-   Figure out why new pred_to_poly conversion isn't working within `map()`
 -   Fix duplication issue when I get polygon IDs.
-
 
 ## Load Libraries
 
@@ -25,15 +26,14 @@ library(emmeans)
 library(tidyverse)
 ```
 
-
 ## Prep Google Drive Authentication
 
 ```{r, include = FALSE}
 drive_auth(email = 'hrodenhizer@woodwellclimate.org')
 ```
 
-
 ## Define Functions
+
 ### make_my_dir
 
 ```{r, include = FALSE}
@@ -92,16 +92,20 @@ json_from_googledrive <- function(name, id, drive_resource, directory) {
 pred_as_poly <- function(prediction) {
   layer <- prediction[['prediction']]
   layer[layer >= 0.5] <- 1
-  layer[layer < 0.5] <- NA
-  poly <- st_as_sf(as.polygons(layer, values = FALSE)) %>%
-      mutate(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
-                                                            '/')[[1]]), 
-                                             '\\.')[[1]])))
-  if (nrow(poly) == 0) {
-    poly <- st_sf(id = as.numeric(first(str_split(last(str_split(sources(prediction), 
-                                                            '/')[[1]]), 
-                                             '\\.')[[1]])), 
-                  geometry = st_sfc(st_polygon(), crs = crs(prediction)))
+  layer[layer < 0.5] <- 0
+  poly <- st_as_sf(as.polygons(layer, values = TRUE)) %>%
+    rename(tk_class = prediction) %>%
+    mutate(tk_class = case_when(tk_class == 0 ~ 'pred_bg',
+                                tk_class == 1 ~ 'pred'),
+           id = first(str_split(last(str_split(sources(prediction), 
+                                               '/')[[1]]), 
+                                '\\.')[[1]])) %>%
+    pivot_wider(names_from = 'tk_class',
+                values_from = 'geometry',
+                names_glue = '{tk_class}_geometry')
+  if (!('pred_geometry' %in% colnames(poly))) {
+    poly <- poly %>%
+      mutate(pred_geometry = st_sfc(st_polygon(), crs = crs(prediction)))
   }
   
   return(poly)
@@ -111,21 +115,24 @@ pred_as_poly <- function(prediction) {
 ### val_as_poly
 
 ```{r, include = FALSE}
-val_as_poly <- function(prediction, rts_poly) {
+val_as_poly <- function(prediction) {
   layer <- prediction[['validation']]
   layer <- classify(layer, 
-                    matrix(c(0, NA,
+                    matrix(c(0, 0,
                              1, 1),
                            ncol = 2,
                            byrow = TRUE))
-  current_id <- as.numeric(first(str_split(last(str_split(sources(prediction), 
+  current_id <- first(str_split(last(str_split(sources(prediction), 
                                                             '/')[[1]]), 
-                                             '\\.')[[1]]))
-  poly <- st_as_sf(as.polygons(layer, values = FALSE)) %>%
-      mutate(id = current_id)
-  if (nrow(poly) == 0) {
-    poly <- st_sf(id = c(0), geometry = st_sfc(st_polygon(), crs = crs(prediction)))
-  }
+                                             '\\.')[[1]])
+  poly <- st_as_sf(as.polygons(layer, values = TRUE)) %>%
+    rename(tk_class = validation) %>%
+    mutate(tk_class = case_when(tk_class == 0 ~ 'val_bg',
+                                tk_class == 1 ~ 'val'),
+           id = current_id) %>%
+    pivot_wider(names_from = 'tk_class',
+                values_from = 'geometry',
+                names_glue = '{tk_class}_geometry')
   
   return(poly)
 }
@@ -190,6 +197,7 @@ recall_precision <- function(truth, iou, thresholds) {
 ```
 
 ### avg_precision
+
 This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
 
 ```{r, echo = FALSE}
@@ -202,6 +210,7 @@ avg_precision <- function(df) {
 ```
 
 ## Prep Plot Variables
+
 ```{r, echo = FALSE}
 imagery_labels <- c('Maxar', 'Planet', 'Sentinel-2')
 imagery_labeller <- c('maxar' = 'Maxar', 'planet' = 'Planet', 'sentinel' = 'Sentinel-2')
@@ -209,204 +218,102 @@ imagery_colors <- c('#FFCC00', '#0099AA', '#0000AA')
 ```
 
 ## Load Data
+
 ### Polygons
 
 ```{r, echo = FALSE}
-rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022.shp') %>%
+rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.shp') %>%
   st_transform(crs = 3413)
 ```
 
 ### Maxar GeoTiffs
 
-20220925-105508 Parameters:
+20230601-161139-04062023 Parameters:
+
 ```{r, echo = FALSE}
 # json metadata
-metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1jUsWsjRPGSROwsT8ENHdsRhxen0p0FlN',
+metadata <- drive_ls('https://drive.google.com/drive/folders/1TNRSVgLRhKbD-HVeC0HOslkFWzmhJija',
                              pattern = 'json$')
-maxar_metadata_1 <- metadata %>%
+maxar_metadata <- metadata %>%
   pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20220925-105508/')
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-20230601-161139-04062023/')
     )
-maxar_metadata_1 %>%
+maxar_metadata %>%
   toJSON() %>%
   minify()
 ```
 
 ```{r, include = FALSE}
-maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1jUsWsjRPGSROwsT8ENHdsRhxen0p0FlN',
+maxar_pred_files <- drive_ls('https://drive.google.com/drive/folders/1TNRSVgLRhKbD-HVeC0HOslkFWzmhJija',
                              pattern = 'tif$') %>%
   arrange(name)
 
-maxar_preds_1 <- maxar_pred_files %>%
+maxar_preds <- maxar_pred_files %>%
   pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20220925-105508/')
-    )
-```
-
-20220925-105508-fixed Parameters:
-```{r, echo = FALSE}
-# json metadata
-metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1HGSyxXaIoyGNY0nI6Rbqg7evPMZa_iAm',
-                             pattern = 'json$')
-maxar_metadata_2 <- metadata %>%
-  pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20220925-105508-fixed/')
-    )
-maxar_metadata_2 %>%
-  toJSON() %>%
-  minify()
-```
-
-```{r, include = FALSE}
-maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1HGSyxXaIoyGNY0nI6Rbqg7evPMZa_iAm',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-maxar_preds_2 <- maxar_pred_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20220925-105508-fixed/')
-    )
-```
-
-20230317-181045 Parameters:
-```{r, echo = FALSE}
-# json metadata
-metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1QicQlzWuaMh-muI28FPz-TlwTybAcB8T',
-                             pattern = 'json$')
-maxar_metadata_3 <- metadata %>%
-  pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20230317-181045/')
-    )
-maxar_metadata_3 %>%
-  toJSON() %>%
-  minify()
-```
-
-```{r, include = FALSE}
-maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1QicQlzWuaMh-muI28FPz-TlwTybAcB8T',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-maxar_preds_3 <- maxar_pred_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20230317-181045/')
-    )
-```
-
-20230426-213214 Parameters:
-```{r, echo = FALSE}
-# json metadata
-metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/10btUO5v9iLRRM0WM5hstBXgtfYEfSYGZ',
-                             pattern = 'json$')
-maxar_metadata_4 <- metadata %>%
-  pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20230426-213214/')
-    )
-maxar_metadata_4 %>%
-  toJSON() %>%
-  minify()
-```
-
-```{r, include = FALSE}
-maxar_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/10btUO5v9iLRRM0WM5hstBXgtfYEfSYGZ',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-maxar_preds_4 <- maxar_pred_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-m20230426-213214/')
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-20230601-161139-04062023/')
     )
 ```
 
 ### Planet GeoTiffs
 
-20230411-102851 Parameters:
+20230604-211027-p04062023 Parameters:
+
 ```{r, echo = FALSE}
 # json metadata
-metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/15vdbvwgMh5RCnEzJekWY0_sVD4s4-fec',
+metadata <- drive_ls('https://drive.google.com/drive/folders/1b1msmrdHmfSAFKb2fseg3CNb-JFJH6oj',
                              pattern = 'json$')
-planet_metadata_1 <- metadata %>%
+planet_metadata <- metadata %>%
   pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/planet/predictions-m20230411-102851/')
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/planet/predictions-20230604-211027-p04062023/')
     )
-planet_metadata_1 %>%
+planet_metadata %>%
   toJSON() %>%
   minify()
 ```
 
 ```{r, include = FALSE}
-planet_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/15vdbvwgMh5RCnEzJekWY0_sVD4s4-fec',
+planet_pred_files <- drive_ls('https://drive.google.com/drive/folders/1b1msmrdHmfSAFKb2fseg3CNb-JFJH6oj',
                              pattern = 'tif$') %>%
   arrange(name)
 
-planet_preds_1 <- planet_pred_files %>%
+planet_preds <- planet_pred_files %>%
   pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/predictions-m20230411-102851/')
-    )
-```
-
-20230411-102851-fixed Parameters:
-```{r, echo = FALSE}
-# json metadata
-metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1Y28fskc7woYjZgh14xP-SBs-bKuG_PW0',
-                             pattern = 'json$')
-planet_metadata_2 <- metadata %>%
-  pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/planet/predictions-m20230411-102851-fixed/')
-    )
-planet_metadata_2 %>%
-  toJSON() %>%
-  minify()
-```
-
-```{r, include = FALSE}
-planet_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1Y28fskc7woYjZgh14xP-SBs-bKuG_PW0',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-planet_preds_2 <- planet_pred_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/predictions-m20230411-102851-fixed/')
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/predictions-20230604-211027-p04062023/')
     )
 ```
 
 ### Sentinel GeoTiffs
 
-20220923-131534 Parameters:
+20220605-000543-p05062023 Parameters:
+
 ```{r, echo = FALSE}
 # json metadata
-metadata <- drive_ls('https://drive.google.com/drive/u/0/folders/1HygGBu1WZatYv1ejU80nOynGkYQU0Rsg',
+metadata <- drive_ls('https://drive.google.com/drive/folders/1RfSjwUPFZ2wmLuRt8-AA3XOKgZH2LcLQ',
                              pattern = 'json$')
-sentinel_metadata_1 <- metadata %>%
+sentinel_metadata <- metadata %>%
   pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-m20220923-131534/')
+    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-20220605-000543-p05062023/')
     )
-sentinel_metadata_1 %>%
+sentinel_metadata %>%
   toJSON() %>%
   minify()
 ```
 
 ```{r, include = FALSE}
-sentinel_pred_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1HygGBu1WZatYv1ejU80nOynGkYQU0Rsg',
+sentinel_pred_files <- drive_ls('https://drive.google.com/drive/folders/1RfSjwUPFZ2wmLuRt8-AA3XOKgZH2LcLQ',
                              pattern = 'tif$') %>%
   arrange(name)
 
-sentinel_preds_1 <- sentinel_pred_files %>%
+sentinel_preds <- sentinel_pred_files %>%
   pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-m20220923-131534/')
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-20220605-000543-p05062023/')
     )
-```
-
-For now, use this to choose which version of the model output to use.
-```{r}
-maxar_preds <- maxar_preds_2
-planet_preds <- planet_preds_2
-sentinel_preds <- sentinel_preds_1
 ```
 
 ## Convert Predictions to Vector
 
 Maxar
+
 ```{r, echo = FALSE}
 maxar_pred_polys <- maxar_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
@@ -418,6 +325,7 @@ maxar_pred_polys_ls <- maxar_preds %>%
 ```
 
 Planet
+
 ```{r, echo = FALSE}
 planet_pred_polys <- planet_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
@@ -429,6 +337,7 @@ planet_pred_polys_ls <- planet_preds %>%
 ```
 
 Sentinel
+
 ```{r, echo = FALSE}
 sentinel_pred_polys <- sentinel_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
@@ -440,16 +349,17 @@ sentinel_pred_polys_ls <- sentinel_preds %>%
 ```
 
 Join Polygons into One SF Dataframe
+
 ```{r, echo = FALSE}
 pred_polys <- maxar_pred_polys %>%
   rbind(planet_pred_polys) %>%
   rbind(sentinel_pred_polys)
 ```
 
-
 ## Convert Validation to Vector
 
 Maxar
+
 ```{r, echo = FALSE}
 maxar_val_polys <- maxar_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
@@ -460,6 +370,7 @@ maxar_val_polys_ls <- maxar_preds %>%
 ```
 
 Planet
+
 ```{r, echo = FALSE}
 planet_val_polys <- planet_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
@@ -470,6 +381,7 @@ planet_val_polys_ls <- planet_preds %>%
 ```
 
 Sentinel
+
 ```{r, echo = FALSE}
 sentinel_val_polys <- sentinel_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
@@ -480,12 +392,12 @@ sentinel_val_polys_ls <- sentinel_preds %>%
 ```
 
 Join Polygons into One SF Dataframe
+
 ```{r, echo = FALSE}
 val_polys <- maxar_val_polys %>%
   rbind(planet_val_polys) %>%
   rbind(sentinel_val_polys)
 ```
-
 
 ## Join Prediction and Validation Polygons
 
@@ -499,7 +411,6 @@ polys <- pred_polys %>%
             by = c('id', 'imagery')) %>%
   st_as_sf(crs = st_crs(pred_polys))
 ```
-
 
 ## Interactive Map of Features
 
@@ -523,8 +434,8 @@ leaflet() %>%
               weight = 2)
 ```
 
-
 ## IoU
+
 ### Calculate Intersection
 
 ```{r, echo = FALSE}
@@ -590,8 +501,29 @@ Planet IoU: `r planet_iou`
 
 Sentinel-2 IoU: `r sentinel_iou`
 
+```{r, echo = FALSE}
+for (i in 1:69) {
+  print(ggplot(data = polys %>%
+                 group_by(imagery) %>%
+                 slice(i)) +
+          geom_sf(aes(geometry = val_geometry),
+                  color = 'black',
+                  fill = 'transparent',
+                  linewidth = 1) +
+          geom_sf(aes(geometry = pred_geometry),
+                  color = 'red',
+                  fill = 'transparent',
+                  linewidth = 1) +
+    facet_grid(.~imagery))
+}
+
+```
+
+
 ## Mean Average Precision
+
 ### Recall-Precision Curves
+
 ```{r, echo = FALSE}
 polys <- polys %>%
   mutate(ground_truth = 1)
@@ -643,8 +575,9 @@ Planet MAP: `r planet_map`
 Sentinel-2 MAP: `r sentinel_map`
 
 ### Plot
-Precision measures false positives.
-Recall measures false negatives.
+
+Precision measures false positives. Recall measures false negatives.
+
 ```{r, echo = FALSE}
 arrow_data <- tibble(x = c(0.5, -0.28),
                      xend = c(1, -0.28),
@@ -690,6 +623,7 @@ rec_pre_plot
 ```
 
 ## Performance by Feature Size
+
 ### Calculate Area
 
 ```{r, echo = FALSE}
@@ -779,7 +713,6 @@ ggplot(rts_outlines, aes(x = Shape_Area, fill = yg)) +
   theme(legend.title = element_blank())
 ```
 
-
 ### Plot
 
 Raw IoU Scores:
@@ -819,6 +752,7 @@ ggplot(poly_size_summary,
 ## Active vs. General RTS Performance
 
 I need to figure out how to deal with polygons that are very close together and show up in the same tile, otherwise this join results in duplicates.
+
 ```{r, echo = FALSE}
 polys <- polys %>%
   st_set_geometry('val_geometry') %>%
@@ -858,7 +792,7 @@ rts_status_pvalues
 
 ### Plot
 
-It is possible to get rid of the inner panel borders, if I decide that looks better: https://stackoverflow.com/questions/46220242/ggplot2-outside-panel-border-when-using-facet
+It is possible to get rid of the inner panel borders, if I decide that looks better: <https://stackoverflow.com/questions/46220242/ggplot2-outside-panel-border-when-using-facet>
 
 ```{r, echo = FALSE}
 ggplot(polys, 
@@ -924,4 +858,3 @@ ggplot(poly_status_size_summary,
   theme(legend.title = element_blank()) + 
   coord_cartesian(ylim = c(0, 1)) 
 ```
-
