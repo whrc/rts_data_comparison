@@ -8,8 +8,11 @@ output:
 
 ## TODO:
 
--   Figure out why new pred_to_poly conversion isn't working within `map()`
--   Fix duplication issue when I get polygon IDs.
+-   Figure out why plotting polys with `geom_sf()` is now failing
+-   Figure out how to remove extra influence of multiple RTS within one tile
+-   Figure out why my IoU scores don't quite match Yili's
+-   Why are there only 69 prediction rasters now?
+-   Update MAP to use both RTS and Background classes
 
 ## Load Libraries
 
@@ -86,6 +89,25 @@ json_from_googledrive <- function(name, id, drive_resource, directory) {
 }
 ```
 
+### bbox_from_rast
+
+```{r, include = FALSE}
+bbox_from_rast <- function(prediction) {
+  bbox <- prediction[['prediction']] %>%
+    ext() %>%
+    st_bbox(crs = crs(prediction)) %>%
+    st_as_sfc() %>%
+    st_as_sf() %>%
+    mutate(id = first(str_split(last(str_split(sources(prediction), 
+                                               '/')[[1]]), 
+                                '\\.')[[1]])) %>%
+    rename(bbox_geometry = x)
+  
+  return(bbox)
+  
+}
+```
+
 ### pred_as_poly
 
 ```{r, include = FALSE}
@@ -102,10 +124,12 @@ pred_as_poly <- function(prediction) {
                                 '\\.')[[1]])) %>%
     pivot_wider(names_from = 'tk_class',
                 values_from = 'geometry',
-                names_glue = '{tk_class}_geometry')
+                names_glue = '{tk_class}_geometry') %>%
+    st_set_geometry('pred_geometry')
   if (!('pred_geometry' %in% colnames(poly))) {
     poly <- poly %>%
-      mutate(pred_geometry = st_sfc(st_polygon(), crs = crs(prediction)))
+      mutate(pred_geometry = st_sfc(st_polygon(), crs = crs(prediction))) %>%
+    st_set_geometry('pred_geometry')
   }
   
   return(poly)
@@ -132,7 +156,8 @@ val_as_poly <- function(prediction) {
            id = current_id) %>%
     pivot_wider(names_from = 'tk_class',
                 values_from = 'geometry',
-                names_glue = '{tk_class}_geometry')
+                names_glue = '{tk_class}_geometry') %>%
+    st_set_geometry('val_geometry')
   
   return(poly)
 }
@@ -223,7 +248,8 @@ imagery_colors <- c('#FFCC00', '#0099AA', '#0000AA')
 
 ```{r, echo = FALSE}
 rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.shp') %>%
-  st_transform(crs = 3413)
+  st_transform(crs = 3413) %>%
+  select(id = ID, region, status = Act_or_Gen, code_id)
 ```
 
 ### Maxar GeoTiffs
@@ -232,9 +258,9 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.s
 
 ```{r, echo = FALSE}
 # json metadata
-metadata <- drive_ls('https://drive.google.com/drive/folders/1TNRSVgLRhKbD-HVeC0HOslkFWzmhJija',
+maxar_metadata <- drive_ls('https://drive.google.com/drive/folders/1TNRSVgLRhKbD-HVeC0HOslkFWzmhJija',
                              pattern = 'json$')
-maxar_metadata <- metadata %>%
+maxar_metadata <- maxar_metadata %>%
   pmap(
     \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-20230601-161139-04062023/')
     )
@@ -252,6 +278,8 @@ maxar_preds <- maxar_pred_files %>%
   pmap(
     \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-20230601-161139-04062023/')
     )
+
+rm(maxar_pred_files)
 ```
 
 ### Planet GeoTiffs
@@ -260,9 +288,9 @@ maxar_preds <- maxar_pred_files %>%
 
 ```{r, echo = FALSE}
 # json metadata
-metadata <- drive_ls('https://drive.google.com/drive/folders/1b1msmrdHmfSAFKb2fseg3CNb-JFJH6oj',
+planet_metadata <- drive_ls('https://drive.google.com/drive/folders/1b1msmrdHmfSAFKb2fseg3CNb-JFJH6oj',
                              pattern = 'json$')
-planet_metadata <- metadata %>%
+planet_metadata <- planet_metadata %>%
   pmap(
     \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/planet/predictions-20230604-211027-p04062023/')
     )
@@ -280,6 +308,8 @@ planet_preds <- planet_pred_files %>%
   pmap(
     \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/predictions-20230604-211027-p04062023/')
     )
+
+rm(planet_pred_files)
 ```
 
 ### Sentinel GeoTiffs
@@ -288,9 +318,9 @@ planet_preds <- planet_pred_files %>%
 
 ```{r, echo = FALSE}
 # json metadata
-metadata <- drive_ls('https://drive.google.com/drive/folders/1RfSjwUPFZ2wmLuRt8-AA3XOKgZH2LcLQ',
+sentinel_metadata <- drive_ls('https://drive.google.com/drive/folders/1RfSjwUPFZ2wmLuRt8-AA3XOKgZH2LcLQ',
                              pattern = 'json$')
-sentinel_metadata <- metadata %>%
+sentinel_metadata <- sentinel_metadata %>%
   pmap(
     \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-20220605-000543-p05062023/')
     )
@@ -308,126 +338,130 @@ sentinel_preds <- sentinel_pred_files %>%
   pmap(
     \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-20220605-000543-p05062023/')
     )
+
+rm(sentinel_pred_files)
 ```
 
-## Convert Predictions to Vector
 
-Maxar
+## Get Tile Bounding Boxes
+
+```{r, echo = FALSE}
+maxar_tiles <- maxar_preds %>%
+  map_dfr(~ bbox_from_rast(.x)) %>%
+  mutate(imagery = 'maxar') %>%
+  select(id, imagery, bbox_geometry)
+
+planet_tiles <- planet_preds %>%
+  map_dfr(~ bbox_from_rast(.x)) %>%
+  mutate(imagery = 'planet') %>%
+  select(id, imagery, bbox_geometry)
+
+sentinel_tiles <- sentinel_preds %>%
+  map_dfr(~ bbox_from_rast(.x)) %>%
+  mutate(imagery = 'sentinel') %>%
+  select(id, imagery, bbox_geometry)
+
+tiles <- maxar_tiles %>%
+  rbind.data.frame(planet_tiles) %>%
+  rbind.data.frame(sentinel_tiles)
+
+rm(maxar_tiles, planet_tiles, sentinel_tiles)
+```
+
+```{r, echo = FALSE}
+polys <- tiles %>%
+  left_join(rts_outlines %>%
+              as_tibble() %>%
+              rename(rts_geometry = geometry), 
+            by = 'id') %>%
+  st_as_sf(crs = st_crs(rts_outlines))
+
+rm(tiles)
+```
+
+
+## Convert Predictions to Vector
 
 ```{r, echo = FALSE}
 maxar_pred_polys <- maxar_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
   mutate(imagery = 'maxar')
 
-maxar_pred_polys_ls <- maxar_preds %>%
-  map(~ pred_as_poly(.x) %>%
-        mutate(imagery = 'maxar'))
-```
-
-Planet
-
-```{r, echo = FALSE}
 planet_pred_polys <- planet_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
   mutate(imagery = 'planet')
 
-planet_pred_polys_ls <- planet_preds %>%
-  map(~ pred_as_poly(.x) %>%
-        mutate(imagery = 'planet'))
-```
-
-Sentinel
-
-```{r, echo = FALSE}
 sentinel_pred_polys <- sentinel_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
   mutate(imagery = 'sentinel')
-
-sentinel_pred_polys_ls <- sentinel_preds %>%
-  map(~ pred_as_poly(.x) %>%
-        mutate(imagery = 'sentinel'))
 ```
 
-Join Polygons into One SF Dataframe
+Join Prediction Polygons into `polys` SF Dataframe
 
 ```{r, echo = FALSE}
 pred_polys <- maxar_pred_polys %>%
   rbind(planet_pred_polys) %>%
   rbind(sentinel_pred_polys)
+
+polys <- polys %>%
+  full_join(pred_polys %>%
+              as_tibble(),
+            by = c('id', 'imagery'))
+
+rm(maxar_pred_polys, planet_pred_polys, sentinel_pred_polys, pred_polys)
 ```
 
-## Convert Validation to Vector
 
-Maxar
+## Convert Validation to Vector
 
 ```{r, echo = FALSE}
 maxar_val_polys <- maxar_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
   mutate(imagery = 'maxar')
 
-maxar_val_polys_ls <- maxar_preds %>%
-  map(~ val_as_poly(.x))
-```
-
-Planet
-
-```{r, echo = FALSE}
 planet_val_polys <- planet_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
   mutate(imagery = 'planet')
 
-planet_val_polys_ls <- planet_preds %>%
-  map(~ val_as_poly(.x))
-```
-
-Sentinel
-
-```{r, echo = FALSE}
 sentinel_val_polys <- sentinel_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
   mutate(imagery = 'sentinel')
-
-sentinel_val_polys_ls <- sentinel_preds %>%
-  map(~ val_as_poly(.x))
 ```
 
-Join Polygons into One SF Dataframe
+Join Validation Polygons into `polys` SF Dataframe
 
 ```{r, echo = FALSE}
 val_polys <- maxar_val_polys %>%
   rbind(planet_val_polys) %>%
   rbind(sentinel_val_polys)
-```
 
-## Join Prediction and Validation Polygons
-
-```{r, echo = FALSE}
-polys <- pred_polys %>%
-  rename(pred_geometry = geometry) %>%
-  as_tibble() %>%
+polys <- polys %>%
   full_join(val_polys %>%
-              rename(val_geometry = geometry) %>%
               as_tibble(),
-            by = c('id', 'imagery')) %>%
-  st_as_sf(crs = st_crs(pred_polys))
+            by = c('id', 'imagery'))
+
+rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 ```
+
 
 ## Interactive Map of Features
 
 ```{r, echo = FALSE}
-pal_viridis <- colorFactor("viridis", pred_polys$imagery)
+pal_viridis <- colorFactor("viridis", polys$imagery)
 
 leaflet() %>%
   addProviderTiles('Esri.WorldImagery') %>%
-  addPolygons(data = pred_polys %>%
+  addPolygons(data = polys %>%
+                select(imagery, pred_geometry) %>%
                 st_transform(crs = 4326), 
               color = ~ pal_viridis(imagery),
               fill = FALSE,
               weight = 2) %>%
-  addLegend(data = pred_polys, 
+  addLegend(data = polys, 
             pal = pal_viridis, 
             values = ~ imagery) %>%
-  addPolygons(data = val_polys %>%
+  addPolygons(data = polys %>%
+                select(val_geometry) %>%
                 st_transform(crs = 4326), 
               color = 'black',
               fill = FALSE,
@@ -436,62 +470,75 @@ leaflet() %>%
 
 ## IoU
 
-### Calculate Intersection
-
-```{r, echo = FALSE}
-intersection <- st_intersection(pred_polys, val_polys)
-intersection <- intersection %>%
-  filter(id == id.1 & imagery == imagery.1) %>%
-  select(id, imagery, int_geometry = geometry)
-```
-
-### Calculate Union
-
-```{r, echo = FALSE}
-union <- st_union(pred_polys, val_polys)
-union <- union %>%
-  filter(id == id.1 & imagery == imagery.1) %>%
-  select(id, imagery, uni_geometry = geometry)
-```
-
-### Join Back to Polys
+### Calculate Intersection and Union
 
 ```{r, echo = FALSE}
 polys <- polys %>%
-  as_tibble() %>%
-  full_join(intersection %>%
-              as_tibble(),
-            by = c('id', 'imagery')) %>%
-  full_join(union %>%
-              as_tibble(),
-            by = c('id', 'imagery')) %>%
-  st_as_sf(crs = st_crs(polys))
+  mutate(rts_int_geometry_from_rast = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_intersection(...)),
+                                  crs - crs(polys)),
+         rts_uni_geometry_from_rast = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_union(...)),
+                                  crs - crs(polys)),
+         bg_int_geometry_from_rast = st_as_sfc(pmap(list(pred_bg_geometry, val_bg_geometry), ~ st_intersection(...)),
+                                  crs - crs(polys)),
+         bg_uni_geometry_from_rast = st_as_sfc(pmap(list(pred_bg_geometry, val_bg_geometry), ~ st_union(...)),
+                                  crs - crs(polys)),
+         rts_int_geometry_from_poly = st_as_sfc(pmap(list(pred_geometry, rts_geometry), ~ st_intersection(...)),
+                                  crs - crs(polys)),
+         rts_uni_geometry_from_poly = st_as_sfc(pmap(list(pred_geometry, rts_geometry), ~ st_union(...)),
+                                  crs - crs(polys)),
+         bg_int_geometry_from_poly = st_as_sfc(pmap(list(pred_bg_geometry, bbox_geometry), ~ st_intersection(...)),
+                                  crs - crs(polys)),
+         bg_uni_geometry_from_poly = st_as_sfc(pmap(list(pred_bg_geometry, bbox_geometry), ~ st_union(...)),
+                                  crs - crs(polys)))
 ```
 
 ### Calculate IoU
 
 ```{r, echo = FALSE}
 polys <- polys %>%
-  mutate(iou = round(as.numeric(st_area(int_geometry)/st_area(uni_geometry)), 2))
+  mutate(rts_iou_from_rast = as.numeric(st_area(rts_int_geometry_from_rast)/st_area(rts_uni_geometry_from_rast)),
+         bg_iou_from_rast = as.numeric(st_area(bg_int_geometry_from_rast)/st_area(bg_uni_geometry_from_rast)),
+         mean_iou_from_rast = round((rts_iou_from_rast + bg_iou_from_rast)/2, 2),
+         rts_iou_from_poly = as.numeric(st_area(rts_int_geometry_from_poly)/st_area(rts_uni_geometry_from_poly)),
+         bg_iou_from_poly = as.numeric(st_area(bg_int_geometry_from_poly)/st_area(bg_uni_geometry_from_poly)),
+         mean_iou_from_poly = round((rts_iou_from_poly + bg_iou_from_poly)/2, 2))
 ```
 
 ```{r, echo = FALSE}
-maxar_iou <- polys %>%
+maxar_iou_from_rast <- polys %>%
   as_tibble() %>%
   filter(imagery == 'maxar') %>%
-  summarise(iou = mean(iou)) %>%
+  summarise(mean_iou = mean(mean_iou_from_rast)) %>%
   as.numeric()
 
-planet_iou <- polys %>%
+planet_iou_from_rast <- polys %>%
   as_tibble() %>%
   filter(imagery == 'planet') %>%
-  summarise(iou = mean(iou)) %>%
+  summarise(mean_iou = mean(mean_iou_from_rast)) %>%
   as.numeric()
 
-sentinel_iou <- polys %>%
+sentinel_iou_from_rast <- polys %>%
   as_tibble() %>%
   filter(imagery == 'sentinel') %>%
-  summarise(iou = mean(iou)) %>%
+  summarise(mean_iou = mean(mean_iou_from_rast)) %>%
+  as.numeric()
+
+maxar_iou_from_poly <- polys %>%
+  as_tibble() %>%
+  filter(imagery == 'maxar') %>%
+  summarise(mean_iou = mean(mean_iou_from_poly)) %>%
+  as.numeric()
+
+planet_iou_from_poly <- polys %>%
+  as_tibble() %>%
+  filter(imagery == 'planet') %>%
+  summarise(mean_iou = mean(mean_iou_from_poly)) %>%
+  as.numeric()
+
+sentinel_iou_from_poly <- polys %>%
+  as_tibble() %>%
+  filter(imagery == 'sentinel') %>%
+  summarise(mean_iou = mean(mean_iou_from_poly)) %>%
   as.numeric()
 ```
 
