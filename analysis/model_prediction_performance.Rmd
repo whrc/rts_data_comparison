@@ -225,10 +225,10 @@ recall_precision <- function(truth, iou, thresholds) {
 This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
 
 ```{r, echo = FALSE}
-mean_avg_precision <- function(df) {
+avg_precision <- function(df) {
   
-  map <- sum((df$recall[1:nrow(df) - 1] - df$recall[2:nrow(df)])*df$precision[1:nrow(df) - 1], na.rm = TRUE)
-  return(map)
+  ap <- sum((df$recall[1:nrow(df) - 1] - df$recall[2:nrow(df)])*df$precision[1:nrow(df) - 1], na.rm = TRUE)
+  return(ap)
   
 }
 ```
@@ -521,132 +521,6 @@ Planet IoU: `r planet_iou`
 
 Sentinel-2 IoU: `r sentinel_iou`
 
-```{r, echo = FALSE}
-# test if st_area is giving different results than rasters
-calc_intersection <- function(x, y) {
-  new_lyr <- x + y
-  new_lyr <- classify(new_lyr,
-                      matrix(c(0, NA,
-                               1, NA,
-                               2, 1),
-                             ncol = 2,
-                             byrow = TRUE))
-  return(new_lyr)
-}
-
-calc_union <- function(x, y) {
-  new_lyr <- x + y
-  new_lyr <- classify(new_lyr,
-                      matrix(c(0, NA,
-                               1, 1,
-                               2, 1),
-                             ncol = 2,
-                             byrow = TRUE))
-  return(new_lyr)
-}
-
-custom_int_uni <- function(x) {
-  id <- first(str_split(last(str_split(sources(x), 
-                                       '/')[[1]]), 
-                        '\\.')[[1]])
-  # print(id)
-  
-  x[['sizes']] <- cellSize(x)
-  
-  x[['rts']] <- x[['prediction']]
-  x[['rts']][x[['prediction']] >= 0.5] <- 1
-  x[['rts']][x[['prediction']] < 0.5] <- 0
-  
-  x[['bg']] <- x[['prediction']]
-  x[['bg']][x[['prediction']] >= 0.5] <- 0
-  x[['bg']][x[['prediction']] < 0.5] <- 1
-  
-  x[['val_bg']] <- classify(x[['validation']],
-                            matrix(c(0, 1,
-                                     1, 0),
-                                   ncol = 2,
-                                   byrow = TRUE))
-  
-  x[['int_rts']] <- calc_intersection(x[['rts']], x[['validation']])
-  x[['uni_rts']] <- calc_union(x[['rts']], x[['validation']])
-  x[['int_bg']] <- calc_intersection(x[['bg']], x[['val_bg']])
-  x[['uni_bg']] <- calc_union(x[['bg']], x[['val_bg']])
- 
-   
-  int_rts <- zonal(x[['sizes']], 
-                   x[['int_rts']], 
-                   sum) %>%
-    select(int_rts = sizes)
-  if (nrow(int_rts) == 0) {
-    int_rts <- data.frame(int_rts = c(0))
-  }
-  
-  uni_rts <- zonal(x[['sizes']], 
-                   x[['uni_rts']], 
-                   sum) %>%
-    select(uni_rts = sizes)
-  if (nrow(uni_rts) == 0) {
-    uni_rts <- data.frame(uni_rts = c(0))
-  }
-  
-  int_bg <- zonal(x[['sizes']], 
-                   x[['int_bg']], 
-                   sum) %>%
-    select(int_bg = sizes)
-  if (nrow(int_bg) == 0) {
-    int_bg <- data.frame(int_bg = c(0))
-  }
-  
-  uni_bg <- zonal(x[['sizes']], 
-                   x[['uni_bg']], 
-                   sum) %>%
-    select(uni_bg = sizes)
-  if (nrow(uni_bg) == 0) {
-    uni_bg <- data.frame(uni_bg = c(0))
-  }
-  
-  int_uni <- int_rts %>%
-    cbind.data.frame(uni_rts) %>%
-    cbind.data.frame(int_bg) %>%
-    cbind.data.frame(uni_bg) %>%
-    mutate(id = id,
-           across(where(is.numeric),
-                  ~ case_when(is.na(.x) ~ 0,
-                              !is.na(.x) ~ .x))) %>%
-    select(id,
-           int_bg,
-           int_rts,
-           uni_bg,
-           uni_rts)
-  
-  return(int_uni)
-}
-
-maxar_int_uni <- map_dfr(maxar_preds, ~ custom_int_uni(.x)) %>%
-  mutate(imagery = 'Maxar')
-
-planet_int_uni <- map_dfr(planet_preds, ~ custom_int_uni(.x)) %>%
-  mutate(imagery = 'Planet')
-
-sentinel_int_uni <- map_dfr(sentinel_preds, ~ custom_int_uni(.x)) %>%
-  mutate(imagery = 'Sentinel-2')
-
-int_uni <- maxar_int_uni %>%
-  rbind.data.frame(planet_int_uni) %>%
-  rbind.data.frame(sentinel_int_uni) %>%
-  mutate(rts_iou = int_rts/uni_rts,
-         bg_iou = int_bg/uni_bg,
-         mean_iou = (rts_iou + bg_iou)/2)
-
-rm(maxar_int_uni, planet_int_uni, sentinel_int_uni)
-
-iou_from_rast <- int_uni %>%
-  group_by(imagery) %>%
-  summarise(rts_iou = mean(rts_iou),
-            bg_iou = mean(bg_iou),
-            mean_iou = mean(mean_iou))
-```
-
 
 ```{r, echo = FALSE}
 for (i in 1:69) {
@@ -688,32 +562,47 @@ polys <- polys %>%
 
 thresholds <- seq(0.2, 0.8, by = 0.1)
 
-maxar_rec_pre <- recall_precision(filter(polys, imagery == 'Maxar')$ground_truth, 
-                           filter(polys, imagery == 'Maxar')$iou, 
+maxar_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Maxar')$ground_truth, 
+                           filter(polys, imagery == 'Maxar')$rts_iou, 
                            thresholds)
 
-planet_rec_pre <- recall_precision(filter(polys, imagery == 'Planet')$ground_truth, 
-                           filter(polys, imagery == 'Planet')$iou, 
+planet_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Planet')$ground_truth, 
+                           filter(polys, imagery == 'Planet')$rts_iou, 
                            thresholds)
 
-sentinel_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$ground_truth, 
-                           filter(polys, imagery == 'Sentinel-2')$iou, 
+sentinel_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$ground_truth, 
+                           filter(polys, imagery == 'Sentinel-2')$rts_iou, 
                            thresholds)
 
-rec_pre <- maxar_rec_pre %>%
-  mutate(imagery = 'Maxar') %>%
-  rbind.data.frame(planet_rec_pre %>%
-                     mutate(imagery = 'Planet')) %>%
-  rbind.data.frame(sentinel_rec_pre %>%
-                     mutate(imagery = 'Sentinel-2'))
+
+maxar_bg_rec_pre <- recall_precision(filter(polys, imagery == 'Maxar')$ground_truth, 
+                           filter(polys, imagery == 'Maxar')$bg_iou, 
+                           thresholds)
+
+planet_bg_rec_pre <- recall_precision(filter(polys, imagery == 'Planet')$ground_truth, 
+                           filter(polys, imagery == 'Planet')$bg_iou, 
+                           thresholds)
+
+sentinel_bg_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$ground_truth, 
+                           filter(polys, imagery == 'Sentinel-2')$bg_iou, 
+                           thresholds)
+
 ```
 
 ### MAP
 
 ```{r, echo = FALSE}
-maxar_map <- avg_precision(maxar_rec_pre)
-planet_map <- avg_precision(planet_rec_pre)
-sentinel_map <- avg_precision(sentinel_rec_pre)
+maxar_rts_map <- avg_precision(maxar_rts_rec_pre)
+planet_rts_map <- avg_precision(planet_rts_rec_pre)
+sentinel_rts_map <- avg_precision(sentinel_rts_rec_pre)
+
+maxar_bg_map <- avg_precision(maxar_bg_rec_pre)
+planet_bg_map <- avg_precision(planet_bg_rec_pre)
+sentinel_bg_map <- avg_precision(sentinel_bg_rec_pre)
+
+maxar_map <- mean(maxar_rts_map, maxar_bg_map)
+planet_map <- mean(planet_rts_map, planet_bg_map)
+sentinel_map <- mean(sentinel_rts_map, sentinel_bg_map)
 
 map_values <- tibble(x_loc = rep(0, 3),
                      y_loc = seq(0.2, 0, length.out = 3),
@@ -723,7 +612,11 @@ map_values <- tibble(x_loc = rep(0, 3),
                              sentinel_map)) %>%
   mutate(map_label = paste(imagery, '=', round(map, 2)))
 
-rm(maxar_rec_pre, planet_rec_pre, sentinel_rec_pre)
+rm(maxar_rts_rec_pre, planet_rts_rec_pre, sentinel_rts_rec_pre,
+   maxar_bg_rec_pre, planet_bg_rec_pre, sentinel_bg_rec_pre,
+   maxar_rts_map, planet_rts_map, sentinel_rts_map,
+   maxar_bg_map, planet_bg_map, sentinel_bg_map,
+   maxar_map, planet_map, sentinel_map)
 ```
 
 Maxar MAP: `r maxar_map`
