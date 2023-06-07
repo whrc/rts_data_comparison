@@ -8,7 +8,6 @@ output:
 
 ## TODO:
 
--   Figure out why plotting polys with `geom_sf()` is now failing
 -   Figure out how to remove extra influence of multiple RTS within one tile
 -   Figure out why my IoU scores don't quite match Yili's
 -   Why are there only 69 prediction rasters now?
@@ -89,10 +88,10 @@ json_from_googledrive <- function(name, id, drive_resource, directory) {
 }
 ```
 
-### bbox_from_rast
+### bbox
 
 ```{r, include = FALSE}
-bbox_from_rast <- function(prediction) {
+bbox <- function(prediction) {
   bbox <- prediction[['prediction']] %>%
     ext() %>%
     st_bbox(crs = crs(prediction)) %>%
@@ -226,10 +225,10 @@ recall_precision <- function(truth, iou, thresholds) {
 This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
 
 ```{r, echo = FALSE}
-avg_precision <- function(df) {
+mean_avg_precision <- function(df) {
   
-  ap <- sum((df$recall[1:nrow(df) - 1] - df$recall[2:nrow(df)])*df$precision[1:nrow(df) - 1], na.rm = TRUE)
-  return(ap)
+  map <- sum((df$recall[1:nrow(df) - 1] - df$recall[2:nrow(df)])*df$precision[1:nrow(df) - 1], na.rm = TRUE)
+  return(map)
   
 }
 ```
@@ -238,7 +237,7 @@ avg_precision <- function(df) {
 
 ```{r, echo = FALSE}
 imagery_labels <- c('Maxar', 'Planet', 'Sentinel-2')
-imagery_labeller <- c('maxar' = 'Maxar', 'planet' = 'Planet', 'sentinel' = 'Sentinel-2')
+imagery_labeller <- c('Maxar' = 'Maxar', 'Planet' = 'Planet', 'Sentinel-2' = 'Sentinel-2')
 imagery_colors <- c('#FFCC00', '#0099AA', '#0000AA')
 ```
 
@@ -347,18 +346,18 @@ rm(sentinel_pred_files)
 
 ```{r, echo = FALSE}
 maxar_tiles <- maxar_preds %>%
-  map_dfr(~ bbox_from_rast(.x)) %>%
-  mutate(imagery = 'maxar') %>%
+  map_dfr(~ bbox(.x)) %>%
+  mutate(imagery = 'Maxar') %>%
   select(id, imagery, bbox_geometry)
 
 planet_tiles <- planet_preds %>%
-  map_dfr(~ bbox_from_rast(.x)) %>%
-  mutate(imagery = 'planet') %>%
+  map_dfr(~ bbox(.x)) %>%
+  mutate(imagery = 'Planet') %>%
   select(id, imagery, bbox_geometry)
 
 sentinel_tiles <- sentinel_preds %>%
-  map_dfr(~ bbox_from_rast(.x)) %>%
-  mutate(imagery = 'sentinel') %>%
+  map_dfr(~ bbox(.x)) %>%
+  mutate(imagery = 'Sentinel-2') %>%
   select(id, imagery, bbox_geometry)
 
 tiles <- maxar_tiles %>%
@@ -385,15 +384,15 @@ rm(tiles)
 ```{r, echo = FALSE}
 maxar_pred_polys <- maxar_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
-  mutate(imagery = 'maxar')
+  mutate(imagery = 'Maxar')
 
 planet_pred_polys <- planet_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
-  mutate(imagery = 'planet')
+  mutate(imagery = 'Planet')
 
 sentinel_pred_polys <- sentinel_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
-  mutate(imagery = 'sentinel')
+  mutate(imagery = 'Sentinel-2')
 ```
 
 Join Prediction Polygons into `polys` SF Dataframe
@@ -417,15 +416,15 @@ rm(maxar_pred_polys, planet_pred_polys, sentinel_pred_polys, pred_polys)
 ```{r, echo = FALSE}
 maxar_val_polys <- maxar_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
-  mutate(imagery = 'maxar')
+  mutate(imagery = 'Maxar')
 
 planet_val_polys <- planet_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
-  mutate(imagery = 'planet')
+  mutate(imagery = 'Planet')
 
 sentinel_val_polys <- sentinel_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
-  mutate(imagery = 'sentinel')
+  mutate(imagery = 'Sentinel-2')
 ```
 
 Join Validation Polygons into `polys` SF Dataframe
@@ -474,72 +473,46 @@ leaflet() %>%
 
 ```{r, echo = FALSE}
 polys <- polys %>%
-  mutate(rts_int_geometry_from_rast = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_intersection(...)),
-                                  crs - crs(polys)),
-         rts_uni_geometry_from_rast = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_union(...)),
-                                  crs - crs(polys)),
-         bg_int_geometry_from_rast = st_as_sfc(pmap(list(pred_bg_geometry, val_bg_geometry), ~ st_intersection(...)),
-                                  crs - crs(polys)),
-         bg_uni_geometry_from_rast = st_as_sfc(pmap(list(pred_bg_geometry, val_bg_geometry), ~ st_union(...)),
-                                  crs - crs(polys)),
-         rts_int_geometry_from_poly = st_as_sfc(pmap(list(pred_geometry, rts_geometry), ~ st_intersection(...)),
-                                  crs - crs(polys)),
-         rts_uni_geometry_from_poly = st_as_sfc(pmap(list(pred_geometry, rts_geometry), ~ st_union(...)),
-                                  crs - crs(polys)),
-         bg_int_geometry_from_poly = st_as_sfc(pmap(list(pred_bg_geometry, bbox_geometry), ~ st_intersection(...)),
-                                  crs - crs(polys)),
-         bg_uni_geometry_from_poly = st_as_sfc(pmap(list(pred_bg_geometry, bbox_geometry), ~ st_union(...)),
-                                  crs - crs(polys)))
+  mutate(rts_int_geometry = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_intersection(...)),
+                                  crs = crs(polys)),
+         rts_uni_geometry = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_union(...)),
+                                  crs = crs(polys)),
+         bg_int_geometry = st_as_sfc(pmap(list(pred_bg_geometry, val_bg_geometry), ~ st_intersection(...)),
+                                  crs = crs(polys)),
+         bg_uni_geometry = st_as_sfc(pmap(list(pred_bg_geometry, val_bg_geometry), ~ st_union(...)),
+                                  crs = crs(polys)))
 ```
 
 ### Calculate IoU
 
 ```{r, echo = FALSE}
 polys <- polys %>%
-  mutate(rts_iou_from_rast = as.numeric(st_area(rts_int_geometry_from_rast)/st_area(rts_uni_geometry_from_rast)),
-         bg_iou_from_rast = as.numeric(st_area(bg_int_geometry_from_rast)/st_area(bg_uni_geometry_from_rast)),
-         mean_iou_from_rast = round((rts_iou_from_rast + bg_iou_from_rast)/2, 2),
-         rts_iou_from_poly = as.numeric(st_area(rts_int_geometry_from_poly)/st_area(rts_uni_geometry_from_poly)),
-         bg_iou_from_poly = as.numeric(st_area(bg_int_geometry_from_poly)/st_area(bg_uni_geometry_from_poly)),
-         mean_iou_from_poly = round((rts_iou_from_poly + bg_iou_from_poly)/2, 2))
+  mutate(rts_iou = as.numeric(st_area(rts_int_geometry)/st_area(rts_uni_geometry)),
+         bg_iou = as.numeric(st_area(bg_int_geometry)/st_area(bg_uni_geometry)),
+         mean_iou = round((rts_iou + bg_iou)/2, 2))
 ```
 
 ```{r, echo = FALSE}
-maxar_iou_from_rast <- polys %>%
+maxar_iou <- polys %>%
   as_tibble() %>%
-  filter(imagery == 'maxar') %>%
-  summarise(mean_iou = mean(mean_iou_from_rast)) %>%
-  as.numeric()
+  filter(imagery == 'Maxar') %>%
+  summarise(mean_iou = mean(mean_iou)) %>%
+  as.numeric()# %>%
+  # round(2)
 
-planet_iou_from_rast <- polys %>%
+planet_iou <- polys %>%
   as_tibble() %>%
-  filter(imagery == 'planet') %>%
-  summarise(mean_iou = mean(mean_iou_from_rast)) %>%
-  as.numeric()
+  filter(imagery == 'Planet') %>%
+  summarise(mean_iou = mean(mean_iou)) %>%
+  as.numeric()# %>%
+  # round(2)
 
-sentinel_iou_from_rast <- polys %>%
+sentinel_iou <- polys %>%
   as_tibble() %>%
-  filter(imagery == 'sentinel') %>%
-  summarise(mean_iou = mean(mean_iou_from_rast)) %>%
-  as.numeric()
-
-maxar_iou_from_poly <- polys %>%
-  as_tibble() %>%
-  filter(imagery == 'maxar') %>%
-  summarise(mean_iou = mean(mean_iou_from_poly)) %>%
-  as.numeric()
-
-planet_iou_from_poly <- polys %>%
-  as_tibble() %>%
-  filter(imagery == 'planet') %>%
-  summarise(mean_iou = mean(mean_iou_from_poly)) %>%
-  as.numeric()
-
-sentinel_iou_from_poly <- polys %>%
-  as_tibble() %>%
-  filter(imagery == 'sentinel') %>%
-  summarise(mean_iou = mean(mean_iou_from_poly)) %>%
-  as.numeric()
+  filter(imagery == 'Sentinel-2') %>%
+  summarise(mean_iou = mean(mean_iou)) %>%
+  as.numeric()# %>%
+  # round(2)
 ```
 
 Maxar IoU: `r maxar_iou`
@@ -549,21 +522,159 @@ Planet IoU: `r planet_iou`
 Sentinel-2 IoU: `r sentinel_iou`
 
 ```{r, echo = FALSE}
+# test if st_area is giving different results than rasters
+calc_intersection <- function(x, y) {
+  new_lyr <- x + y
+  new_lyr <- classify(new_lyr,
+                      matrix(c(0, NA,
+                               1, NA,
+                               2, 1),
+                             ncol = 2,
+                             byrow = TRUE))
+  return(new_lyr)
+}
+
+calc_union <- function(x, y) {
+  new_lyr <- x + y
+  new_lyr <- classify(new_lyr,
+                      matrix(c(0, NA,
+                               1, 1,
+                               2, 1),
+                             ncol = 2,
+                             byrow = TRUE))
+  return(new_lyr)
+}
+
+custom_int_uni <- function(x) {
+  id <- first(str_split(last(str_split(sources(x), 
+                                       '/')[[1]]), 
+                        '\\.')[[1]])
+  # print(id)
+  
+  x[['sizes']] <- cellSize(x)
+  
+  x[['rts']] <- x[['prediction']]
+  x[['rts']][x[['prediction']] >= 0.5] <- 1
+  x[['rts']][x[['prediction']] < 0.5] <- 0
+  
+  x[['bg']] <- x[['prediction']]
+  x[['bg']][x[['prediction']] >= 0.5] <- 0
+  x[['bg']][x[['prediction']] < 0.5] <- 1
+  
+  x[['val_bg']] <- classify(x[['validation']],
+                            matrix(c(0, 1,
+                                     1, 0),
+                                   ncol = 2,
+                                   byrow = TRUE))
+  
+  x[['int_rts']] <- calc_intersection(x[['rts']], x[['validation']])
+  x[['uni_rts']] <- calc_union(x[['rts']], x[['validation']])
+  x[['int_bg']] <- calc_intersection(x[['bg']], x[['val_bg']])
+  x[['uni_bg']] <- calc_union(x[['bg']], x[['val_bg']])
+ 
+   
+  int_rts <- zonal(x[['sizes']], 
+                   x[['int_rts']], 
+                   sum) %>%
+    select(int_rts = sizes)
+  if (nrow(int_rts) == 0) {
+    int_rts <- data.frame(int_rts = c(0))
+  }
+  
+  uni_rts <- zonal(x[['sizes']], 
+                   x[['uni_rts']], 
+                   sum) %>%
+    select(uni_rts = sizes)
+  if (nrow(uni_rts) == 0) {
+    uni_rts <- data.frame(uni_rts = c(0))
+  }
+  
+  int_bg <- zonal(x[['sizes']], 
+                   x[['int_bg']], 
+                   sum) %>%
+    select(int_bg = sizes)
+  if (nrow(int_bg) == 0) {
+    int_bg <- data.frame(int_bg = c(0))
+  }
+  
+  uni_bg <- zonal(x[['sizes']], 
+                   x[['uni_bg']], 
+                   sum) %>%
+    select(uni_bg = sizes)
+  if (nrow(uni_bg) == 0) {
+    uni_bg <- data.frame(uni_bg = c(0))
+  }
+  
+  int_uni <- int_rts %>%
+    cbind.data.frame(uni_rts) %>%
+    cbind.data.frame(int_bg) %>%
+    cbind.data.frame(uni_bg) %>%
+    mutate(id = id,
+           across(where(is.numeric),
+                  ~ case_when(is.na(.x) ~ 0,
+                              !is.na(.x) ~ .x))) %>%
+    select(id,
+           int_bg,
+           int_rts,
+           uni_bg,
+           uni_rts)
+  
+  return(int_uni)
+}
+
+maxar_int_uni <- map_dfr(maxar_preds, ~ custom_int_uni(.x)) %>%
+  mutate(imagery = 'Maxar')
+
+planet_int_uni <- map_dfr(planet_preds, ~ custom_int_uni(.x)) %>%
+  mutate(imagery = 'Planet')
+
+sentinel_int_uni <- map_dfr(sentinel_preds, ~ custom_int_uni(.x)) %>%
+  mutate(imagery = 'Sentinel-2')
+
+int_uni <- maxar_int_uni %>%
+  rbind.data.frame(planet_int_uni) %>%
+  rbind.data.frame(sentinel_int_uni) %>%
+  mutate(rts_iou = int_rts/uni_rts,
+         bg_iou = int_bg/uni_bg,
+         mean_iou = (rts_iou + bg_iou)/2)
+
+rm(maxar_int_uni, planet_int_uni, sentinel_int_uni)
+
+iou_from_rast <- int_uni %>%
+  group_by(imagery) %>%
+  summarise(rts_iou = mean(rts_iou),
+            bg_iou = mean(bg_iou),
+            mean_iou = mean(mean_iou))
+```
+
+
+```{r, echo = FALSE}
 for (i in 1:69) {
-  print(ggplot(data = polys %>%
-                 group_by(imagery) %>%
-                 slice(i)) +
+  current_data <- polys %>%
+    group_by(imagery) %>%
+    slice(i)
+  current_id <- unique(current_data$id)
+  labeller <- function(variable, value){
+    return(hospital_names[value])
+  }
+  print(ggplot(data = current_data) +
+          geom_sf(aes(geometry = bbox_geometry),
+                  color = 'black',
+                  fill = 'transparent') +
           geom_sf(aes(geometry = val_geometry),
                   color = 'black',
                   fill = 'transparent',
-                  linewidth = 1) +
+                  linewidth = 0.5) +
           geom_sf(aes(geometry = pred_geometry),
                   color = 'red',
                   fill = 'transparent',
-                  linewidth = 1) +
-    facet_grid(.~imagery))
+                  linewidth = 0.5) +
+          facet_grid(.~ imagery + paste('mIoU:', mean_iou)) +
+          ggtitle(paste('ID:', current_id)) +
+          theme(axis.title = element_blank()) +
+          theme_bw()
+          )
 }
-
 ```
 
 
@@ -577,24 +688,24 @@ polys <- polys %>%
 
 thresholds <- seq(0.2, 0.8, by = 0.1)
 
-maxar_rec_pre <- recall_precision(filter(polys, imagery == 'maxar')$ground_truth, 
-                           filter(polys, imagery == 'maxar')$iou, 
+maxar_rec_pre <- recall_precision(filter(polys, imagery == 'Maxar')$ground_truth, 
+                           filter(polys, imagery == 'Maxar')$iou, 
                            thresholds)
 
-planet_rec_pre <- recall_precision(filter(polys, imagery == 'planet')$ground_truth, 
-                           filter(polys, imagery == 'planet')$iou, 
+planet_rec_pre <- recall_precision(filter(polys, imagery == 'Planet')$ground_truth, 
+                           filter(polys, imagery == 'Planet')$iou, 
                            thresholds)
 
-sentinel_rec_pre <- recall_precision(filter(polys, imagery == 'sentinel')$ground_truth, 
-                           filter(polys, imagery == 'sentinel')$iou, 
+sentinel_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$ground_truth, 
+                           filter(polys, imagery == 'Sentinel-2')$iou, 
                            thresholds)
 
 rec_pre <- maxar_rec_pre %>%
-  mutate(imagery = 'maxar') %>%
+  mutate(imagery = 'Maxar') %>%
   rbind.data.frame(planet_rec_pre %>%
-                     mutate(imagery = 'planet')) %>%
+                     mutate(imagery = 'Planet')) %>%
   rbind.data.frame(sentinel_rec_pre %>%
-                     mutate(imagery = 'sentinel'))
+                     mutate(imagery = 'Sentinel-2'))
 ```
 
 ### MAP
