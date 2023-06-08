@@ -11,7 +11,8 @@ output:
 -   Figure out how to remove extra influence of multiple RTS within one tile
 -   Figure out why my IoU scores don't quite match Yili's
 -   Why are there only 69 prediction rasters now?
--   Update MAP to use both RTS and Background classes
+-   Add confidence intervals to IoU by size smooth lines
+-   Get data to investigate why some small RTS are predicted really well
 
 ## Load Libraries
 
@@ -25,6 +26,7 @@ library(googledrive)
 library(jsonlite)
 library(smoothr)
 library(emmeans)
+library(nlstools)
 library(tidyverse)
 ```
 
@@ -225,9 +227,9 @@ recall_precision <- function(truth, iou, thresholds) {
 This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
 
 ```{r, echo = FALSE}
-avg_precision <- function(df) {
+avg_precision <- function(recall, precision) {
   
-  ap <- sum((df$recall[1:nrow(df) - 1] - df$recall[2:nrow(df)])*df$precision[1:nrow(df) - 1], na.rm = TRUE)
+  ap <- sum((recall[1:length(recall) - 1] - recall[2:length(recall)])*precision[1:length(precision) - 1], na.rm = TRUE)
   return(ap)
   
 }
@@ -248,7 +250,7 @@ imagery_colors <- c('#FFCC00', '#0099AA', '#0000AA')
 ```{r, echo = FALSE}
 rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.shp') %>%
   st_transform(crs = 3413) %>%
-  select(id = ID, region, status = Act_or_Gen, code_id)
+  select(id = ID, region, status = Act_or_Gen, code_id, rts_area = Shape_Area, Long)
 ```
 
 ### Maxar GeoTiffs
@@ -489,37 +491,17 @@ polys <- polys %>%
 polys <- polys %>%
   mutate(rts_iou = as.numeric(st_area(rts_int_geometry)/st_area(rts_uni_geometry)),
          bg_iou = as.numeric(st_area(bg_int_geometry)/st_area(bg_uni_geometry)),
-         mean_iou = round((rts_iou + bg_iou)/2, 2))
+         mean_iou = (rts_iou + bg_iou)/2)
 ```
 
 ```{r, echo = FALSE}
-maxar_iou <- polys %>%
+iou <- polys %>%
   as_tibble() %>%
-  filter(imagery == 'Maxar') %>%
-  summarise(mean_iou = mean(mean_iou)) %>%
-  as.numeric()# %>%
-  # round(2)
-
-planet_iou <- polys %>%
-  as_tibble() %>%
-  filter(imagery == 'Planet') %>%
-  summarise(mean_iou = mean(mean_iou)) %>%
-  as.numeric()# %>%
-  # round(2)
-
-sentinel_iou <- polys %>%
-  as_tibble() %>%
-  filter(imagery == 'Sentinel-2') %>%
-  summarise(mean_iou = mean(mean_iou)) %>%
-  as.numeric()# %>%
-  # round(2)
+  group_by(imagery) %>%
+  summarise(mean_iou = round(mean(mean_iou), 2))
 ```
 
-Maxar IoU: `r maxar_iou`
-
-Planet IoU: `r planet_iou`
-
-Sentinel-2 IoU: `r sentinel_iou`
+`r iou`
 
 
 ```{r, echo = FALSE}
@@ -548,6 +530,9 @@ for (i in 1:69) {
           theme(axis.title = element_blank()) +
           theme_bw()
           )
+  
+  rm(current_data, current_id, labeller)
+  
 }
 ```
 
@@ -574,6 +559,13 @@ sentinel_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$
                            filter(polys, imagery == 'Sentinel-2')$rts_iou, 
                            thresholds)
 
+rts_rec_pre <- maxar_rts_rec_pre %>%
+  mutate(imagery = 'Maxar') %>%
+  rbind.data.frame(planet_rts_rec_pre %>%
+                     mutate(imagery = 'Planet')) %>%
+  rbind.data.frame(sentinel_rts_rec_pre %>%
+                     mutate(imagery = 'Sentinel-2'))
+
 
 maxar_bg_rec_pre <- recall_precision(filter(polys, imagery == 'Maxar')$ground_truth, 
                            filter(polys, imagery == 'Maxar')$bg_iou, 
@@ -587,43 +579,37 @@ sentinel_bg_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$g
                            filter(polys, imagery == 'Sentinel-2')$bg_iou, 
                            thresholds)
 
+bg_rec_pre <- maxar_bg_rec_pre %>%
+  mutate(imagery = 'Maxar') %>%
+  rbind.data.frame(planet_bg_rec_pre %>%
+                     mutate(imagery = 'Planet')) %>%
+  rbind.data.frame(sentinel_bg_rec_pre %>%
+                     mutate(imagery = 'Sentinel-2'))
+
+rec_pre <- rts_rec_pre %>%
+  mutate(class = 'rts') %>%
+  rbind.data.frame(bg_rec_pre %>%
+                     mutate(class = 'bg'))
+
+rm(maxar_rts_rec_pre, planet_rts_rec_pre, sentinel_rts_rec_pre,
+   maxar_bg_rec_pre, planet_bg_rec_pre, sentinel_bg_rec_pre,
+   rts_rec_pre, bg_rec_pre)
 ```
 
 ### MAP
 
 ```{r, echo = FALSE}
-maxar_rts_map <- avg_precision(maxar_rts_rec_pre)
-planet_rts_map <- avg_precision(planet_rts_rec_pre)
-sentinel_rts_map <- avg_precision(sentinel_rts_rec_pre)
+avg_pre <- rec_pre %>%
+  group_by(imagery, class) %>%
+  summarise(avg_pre = avg_precision(recall, precision))
 
-maxar_bg_map <- avg_precision(maxar_bg_rec_pre)
-planet_bg_map <- avg_precision(planet_bg_rec_pre)
-sentinel_bg_map <- avg_precision(sentinel_bg_rec_pre)
-
-maxar_map <- mean(maxar_rts_map, maxar_bg_map)
-planet_map <- mean(planet_rts_map, planet_bg_map)
-sentinel_map <- mean(sentinel_rts_map, sentinel_bg_map)
-
-map_values <- tibble(x_loc = rep(0, 3),
-                     y_loc = seq(0.2, 0, length.out = 3),
-                     imagery = imagery_labels,
-                     map = c(maxar_map,
-                             planet_map,
-                             sentinel_map)) %>%
-  mutate(map_label = paste(imagery, '=', round(map, 2)))
-
-rm(maxar_rts_rec_pre, planet_rts_rec_pre, sentinel_rts_rec_pre,
-   maxar_bg_rec_pre, planet_bg_rec_pre, sentinel_bg_rec_pre,
-   maxar_rts_map, planet_rts_map, sentinel_rts_map,
-   maxar_bg_map, planet_bg_map, sentinel_bg_map,
-   maxar_map, planet_map, sentinel_map)
+mean_avg_pre <- avg_pre %>%
+  group_by(imagery) %>%
+  summarise(map = mean(avg_pre)) %>%
+  mutate(x_loc = rep(0, 3),
+         y_loc = seq(0.2, 0, length.out = 3),
+         map_label = paste(imagery, 'MAP =', round(map, 2)))
 ```
-
-Maxar MAP: `r maxar_map`
-
-Planet MAP: `r planet_map`
-
-Sentinel-2 MAP: `r sentinel_map`
 
 ### Plot
 
@@ -633,17 +619,21 @@ Precision measures false positives. Recall measures false negatives.
 arrow_data <- tibble(x = c(0.5, -0.28),
                      xend = c(1, -0.28),
                      y = c(-0.24, 0.5),
-                     yend = c(-0.24, 1))
-label_data <- tibble(x = c(0.5, -0.28),
-                     y = c(-0.24, 0.5),
+                     yend = c(-0.24, 1),
+                     imagery = rep('Maxar', 2),
+                     class = rep('rts', 2))
+label_data <- tibble(x = c(0, -0.28),
+                     y = c(-0.24, 0),
                      label = c('Fewer False Negatives    ',
                                'Fewer False Positives    '),
-                     angle = c(0, 90))
+                     angle = c(0, 90),
+                     imagery = rep('Maxar', 2),
+                     class = rep('rts', 2))
 
 rec_pre_plot <- ggplot(rec_pre,
-                       aes(x = recall, y = precision, color = imagery)) +
+                       aes(x = recall, y = precision, color = imagery, linetype = class)) +
   geom_line() +
-  geom_text(data = map_values,
+  geom_text(data = mean_avg_pre,
             aes(x = x_loc, y = y_loc, label = map_label),
             inherit.aes = FALSE,
             hjust = 0,
@@ -657,13 +647,16 @@ rec_pre_plot <- ggplot(rec_pre,
             aes(x = x, y = y, label = label, angle = angle),
             inherit.aes = FALSE,
             size = 3.5,
-            hjust = 1,
+            hjust = 0,
             vjust = 0.4,
             color = 'black') +
   scale_x_continuous(name = 'Recall') +
   scale_y_continuous(name = 'Precision') +
   scale_color_manual(labels = imagery_labels,
                      values = imagery_colors) +
+  scale_linetype_manual(labels = c('Background', 'RTS'),
+                        values = c('dashed', 'solid')) +
+  # facet_grid(. ~ imagery) +
   coord_fixed(xlim = c(0, 1),
                   ylim = c(0, 1),
                   clip = 'off') +
@@ -684,8 +677,8 @@ polys <- polys %>%
 
 poly_size_summary <- polys %>%
   group_by(imagery, rts_area_class) %>%
-  summarise(iou_mean = mean(iou),
-            iou_se = sd(iou)/sqrt(n()))
+  summarise(iou_mean = mean(mean_iou),
+            iou_se = sd(mean_iou)/sqrt(n()))
 ```
 
 ### Size Distribution by Region
@@ -708,25 +701,32 @@ world_north <- world %>%
 world_north_buffer <- world_north %>%
   st_buffer(50000)
 
-if (!('name_long' %in% colnames(rts_outlines))) {
+if (!('name_long' %in% colnames(polys))) {
   
-  rts_outlines <- rts_outlines %>%
+  polys <- polys %>%
   st_join(world_north_buffer)
   
 }
 
+polys <- polys %>%
+  mutate(yg = case_when(Long > 60 & Long < 80 ~ 'Yamal/Gydan',
+                        TRUE ~ 'Other'))
+# 
+# rts_outlines <- rts_outlines %>%
+#   mutate(yg = case_when(Long > 60 & Long < 80 ~ 'Yamal/Gydan',
+#                         TRUE ~ 'Other'))
+# 
 # ggplot() +
 #   geom_sf(data = world_north, fill = 'transparent') +
-#   geom_sf(data = rts_outlines, 
-#           aes(color = name_long),
+#   geom_sf(data = rts_outlines,
+#           aes(color = yg),
 #           linewidth = 1)
 ```
 
 ```{r}
-ggplot(rts_outlines, aes(x = Shape_Area, fill = name_long)) +
-  geom_histogram(position = position_dodge(), bins = 15) +
-  scale_fill_manual(labels = c('Canada', 'Russia'),
-                     values = c('gray50', 'gray20')) +
+ggplot(polys, aes(x = rts_area, fill = yg)) +
+  geom_histogram(position = position_dodge(), bins = 11) +
+  scale_fill_manual(values = c('gray50', 'gray20')) +
   scale_x_log10(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'Count') +
   theme_bw() +
@@ -734,27 +734,16 @@ ggplot(rts_outlines, aes(x = Shape_Area, fill = name_long)) +
 ```
 
 ```{r}
-rts_outlines <- rts_outlines %>%
-  mutate(yg = ifelse(Long > 67 & Long < 70,
-                     'yg',
-                     'other'))
-
-# ggplot(rts_outlines %>%
-#          filter(name_long == 'Russian Federation')) +
-#   geom_sf(aes(color = yg),
-#           linewidth = 1)
-```
-
-```{r}
-rts_summaries <- rts_outlines %>%
+rts_summaries <- polys %>%
+  as_tibble() %>%
   group_by(yg) %>%
-  summarise(mean_size = mean(Shape_Area),
-            min_size = min(Shape_Area),
-            max_size = max(Shape_Area),
-            median_size = median(Shape_Area))
+  summarise(mean_size = mean(rts_area),
+            min_size = min(rts_area),
+            max_size = max(rts_area),
+            median_size = median(rts_area))
 rts_summaries
 
-ggplot(rts_outlines, aes(x = Shape_Area, fill = yg)) +
+ggplot(polys, aes(x = rts_area, fill = yg)) +
   geom_histogram(position = position_dodge(), bins = 15) +
   scale_fill_manual(labels = c('Other', 'YG'),
                      values = c('gray50', 'gray20')) +
@@ -768,61 +757,161 @@ ggplot(rts_outlines, aes(x = Shape_Area, fill = yg)) +
 
 Raw IoU Scores:
 
+This is complicated by the fact that the rts_area column is calculated from the raster validation layer, which may contain several RTS features within one tile. Use rts_area (from the original RTS delineation), instead.
+
+Run `nls` models and bootstrap parameters
+
 ```{r, echo = FALSE}
-ggplot(polys, aes(x = rts_area, y = iou, color = imagery)) +
+# maxar_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
+#                start = list(Km = 50, Vmax = 2),
+#                data = polys %>%
+#                  filter(imagery == 'Maxar'))
+# 
+# maxar_iou_boot <- nlsBoot(maxar_iou_nls, 500000)
+# saveRDS(maxar_iou_nls, './data/models/maxar_iou_nls.RData')
+# saveRDS(maxar_iou_boot, './data/models/maxar_iou_boot.RData')
+
+maxar_iou_nls <- readRDS('./data/models/maxar_iou_nls.RData')
+maxar_iou_boot <- readRDS('./data/models/maxar_iou_boot.RData')
+```
+
+```{r, echo = FALSE}
+# planet_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
+#                start = list(Km = 50, Vmax = 2),
+#                data = polys %>%
+#                  filter(imagery == 'Planet'))
+# 
+# planet_iou_boot <- nlsBoot(planet_iou_nls, 500000)
+# saveRDS(planet_iou_nls, './data/models/planet_iou_nls.RData')
+# saveRDS(planet_iou_boot, './data/models/planet_iou_boot.RData')
+
+planet_iou_nls <- readRDS('./data/models/planet_iou_nls.RData')
+planet_iou_boot <- readRDS('./data/models/planet_iou_boot.RData')
+```
+
+```{r, echo = FALSE}
+# sentinel_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
+#                start = list(Km = 50, Vmax = 2),
+#                data = polys %>%
+#                  filter(imagery == 'Sentinel-2'))
+# 
+# sentinel_iou_boot <- nlsBoot(sentinel_iou_nls, 500000)
+# saveRDS(sentinel_iou_nls, './data/models/sentinel_iou_nls.RData')
+# saveRDS(sentinel_iou_boot, './data/models/sentinel_iou_boot.RData')
+
+sentinel_iou_nls <- readRDS('./data/models/sentinel_iou_nls.RData')
+sentinel_iou_boot <- readRDS('./data/models/sentinel_iou_boot.RData')
+```
+
+Bootstrap predictions for plotting the `nls` models
+
+```{r, echo = FALSE}
+newdata <- tibble(rts_area = seq(min(polys$rts_area), max(polys$rts_area), length.out = 200))
+```
+
+```{r, echo = FALSE}
+# maxar_iou_predict <- nlsBootPredict(maxar_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(maxar_iou_predict, './data/models/maxar_iou_predict.RData')
+
+maxar_iou_predict <- readRDS('./data/models/maxar_iou_predict.RData')
+maxar_iou_ci <- newdata %>%
+  cbind(maxar_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `2.5%`, upr = `97.5%`) %>%
+  mutate(predict = predict(maxar_iou_nls, newdata),
+         predict_lwr = maxar_iou_boot[["bootCI"]][2, 2] * rts_area / (maxar_iou_boot[["bootCI"]][1, 3] + rts_area),
+         predict_upr = maxar_iou_boot[["bootCI"]][2, 3] * rts_area / (maxar_iou_boot[["bootCI"]][1, 2] + rts_area))
+```
+
+```{r, echo = FALSE}
+# planet_iou_predict <- nlsBootPredict(planet_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(planet_iou_predict, './data/models/planet_iou_predict.RData')
+
+planet_iou_predict <- readRDS('./data/models/planet_iou_predict.RData')
+planet_iou_ci <- newdata %>%
+  cbind(planet_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `2.5%`, upr = `97.5%`) %>%
+  mutate(predict = predict(planet_iou_nls, newdata),
+         predict_lwr = predict - (upr - lwr)/2,
+         predict_upr = predict + (upr - lwr)/2,
+         predict_lwr = planet_iou_boot[["bootCI"]][2, 2] * rts_area / (planet_iou_boot[["bootCI"]][1, 3] + rts_area),
+         predict_upr = planet_iou_boot[["bootCI"]][2, 3] * rts_area / (planet_iou_boot[["bootCI"]][1, 2] + rts_area))
+```
+
+```{r, echo = FALSE}
+# sentinel_iou_predict <- nlsBootPredict(sentinel_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(sentinel_iou_predict, './data/models/sentinel_iou_predict.RData')
+
+sentinel_iou_predict <- readRDS('./data/models/sentinel_iou_predict.RData')
+sentinel_iou_ci <- newdata %>%
+  cbind(sentinel_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `2.5%`, upr = `97.5%`) %>%
+  mutate(predict = predict(sentinel_iou_nls, newdata),
+         predict_lwr = predict - (upr - lwr)/2,
+         predict_upr = predict + (upr - lwr)/2,
+         predict_lwr = sentinel_iou_boot[["bootCI"]][2, 2] * rts_area / (sentinel_iou_boot[["bootCI"]][1, 3] + rts_area),
+         predict_upr = sentinel_iou_boot[["bootCI"]][2, 3] * rts_area / (sentinel_iou_boot[["bootCI"]][1, 2] + rts_area))
+```
+
+Plot the Size/Performance plot
+
+```{r, echo = FALSE}
+iou_ci <- maxar_iou_ci %>%
+  mutate(imagery = 'Maxar') %>%
+  rbind(planet_iou_ci %>%
+          mutate(imagery = 'Planet')) %>%
+  rbind(sentinel_iou_ci %>%
+          mutate(imagery = 'Sentinel-2'))
+
+rm(maxar_iou_nls, maxar_iou_boot, maxar_iou_predict, maxar_iou_ci,
+   planet_iou_nls, planet_iou_boot, planet_iou_predict, planet_iou_ci,
+   sentinel_iou_nls, sentinel_iou_boot, sentinel_iou_predict, sentinel_iou_ci)
+```
+
+```{r, echo = FALSE}
+ggplot(polys, aes(x = rts_area, y = mean_iou, color = imagery)) +
   geom_point(size = 1) +
-  geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs")) +
+  # geom_smooth(method="nls",
+  #             method.args = list(formula = y ~ Vmax * x / (Km + x),
+  #                                start = list(Km = 50, Vmax = 2)),
+  #             data = polys,
+  #             se = FALSE,
+  #             aes(color = imagery),
+  #             linetype = 'dashed') +
+  geom_ribbon(data = iou_ci,
+            aes(x = rts_area, ymin = predict_lwr, ymax = predict_upr, group = imagery),
+            alpha = 0.2,
+            inherit.aes = FALSE) +
+  geom_line(data = iou_ci, 
+            aes(x = rts_area, y = predict, color = imagery),
+            inherit.aes = FALSE) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'IoU') +
   scale_color_manual(values = imagery_colors,
                      labels = imagery_labels) +
   theme_bw() +
-  theme(legend.title = element_blank()) + 
-  coord_cartesian(ylim = c(0, 1)) 
+  theme(legend.title = element_blank())
 ```
 
-Binned IoU Scores:
-
-```{r, echo = FALSE}
-ggplot(poly_size_summary, 
-       aes(x = rts_area_class, y = iou_mean, color = imagery)) +
-  geom_point(size = 1) +
-  # geom_errorbar(aes(ymin = iou_mean - iou_se, ymax = iou_mean + iou_se)) +
-  geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs")) +
-  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'IoU') +
-  scale_color_manual(values = imagery_colors,
-                     labels = imagery_labels) +
-  scale_fill_manual(values = imagery_colors,
-                     labels = imagery_labels) +
-  theme_bw() +
-  theme(legend.title = element_blank()) + 
-  coord_cartesian(ylim = c(0, 1)) 
-```
 
 ## Active vs. General RTS Performance
 
 I need to figure out how to deal with polygons that are very close together and show up in the same tile, otherwise this join results in duplicates.
 
 ```{r, echo = FALSE}
-polys <- polys %>%
-  st_set_geometry('val_geometry') %>%
-  st_join(rts_outlines) %>%
-  st_set_geometry('pred_geometry')
-```
-
-```{r, echo = FALSE}
 iou_by_rts_status <- polys %>%
   as_tibble() %>%
-  group_by(imagery, Act_or_Gen) %>%
-  summarise(iou = mean(iou))
+  group_by(imagery, status) %>%
+  summarise(mean_iou = mean(mean_iou))
 ```
 
 ```{r, echo = FALSE}
-rts_status_lm <- lm(iou ~ imagery * Act_or_Gen,
+rts_status_lm <- lm(mean_iou ~ imagery * status,
                              data = polys)
 rts_status_contrasts <- emmeans(rts_status_lm,
-        pairwise ~ Act_or_Gen | imagery,
+        pairwise ~ status | imagery,
         adjust = 'tukey')
 rts_status_contrasts
 rts_status_pvalues <- tibble(
@@ -847,9 +936,9 @@ It is possible to get rid of the inner panel borders, if I decide that looks bet
 
 ```{r, echo = FALSE}
 ggplot(polys, 
-       aes(x = Act_or_Gen, 
-           y = iou, 
-           group = interaction(imagery, Act_or_Gen))) +
+       aes(x = status, 
+           y = mean_iou, 
+           group = interaction(imagery, status))) +
   geom_point(position = position_jitterdodge(seed = 1, 
                                              dodge.width = 0.9, 
                                              jitter.width = 0.5),
@@ -885,18 +974,24 @@ ggplot(polys,
 
 ```{r, echo = FALSE}
 poly_status_size_summary <- polys %>%
-  group_by(imagery, Act_or_Gen, rts_area_class) %>%
-  summarise(iou_mean = mean(iou),
-            iou_se = sd(iou)/sqrt(n()))
+  group_by(imagery, status, rts_area_class) %>%
+  summarise(iou_mean = mean(mean_iou),
+            iou_se = sd(mean_iou)/sqrt(n()))
 ```
 
 ```{r, echo = FALSE}
 ggplot(poly_status_size_summary, 
        aes(x = rts_area_class, y = iou_mean, color = imagery)) +
-  geom_point(size = 2, aes(shape = Act_or_Gen)) +
+  geom_point(size = 2, aes(shape = status)) +
   # geom_errorbar(aes(ymin = iou_mean - iou_se, ymax = iou_mean + iou_se)) +
-  geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs"),
-              aes(linetype = Act_or_Gen)) +
+  # geom_smooth(method = 'gam', formula = y ~ s(x, bs = "cs"),
+  #             aes(linetype = status)) +
+  geom_smooth(method="nls",
+              method.args = list(formula = y ~ Vmax * x / (Km + x),
+                                 start = list(Km = 50, Vmax = 2)),
+              data = poly_status_size_summary,
+              se = FALSE,
+              aes(color = imagery, linetype = status)) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'IoU') +
   scale_color_manual(values = imagery_colors,
@@ -909,3 +1004,61 @@ ggplot(poly_status_size_summary,
   theme(legend.title = element_blank()) + 
   coord_cartesian(ylim = c(0, 1)) 
 ```
+
+
+## Small RTS with High IoU/Large RTS with Low IoU
+
+Currently using mean values to filter based on size and IoU. Could use the confidence intervals of a non-linear fit instead?
+
+```{r, echo = FALSE}
+polys %>%
+  as_tibble() %>%
+  summarise(mean_size = mean(rts_area),
+            min_size = min(rts_area),
+            max_size = max(rts_area),
+            median_size = median(rts_area),
+            sd_size = sd(rts_area))
+
+ggplot(polys, aes(x = rts_area)) +
+  geom_histogram(bins = 50) +
+  geom_vline(xintercept = mean(polys$rts_area)) +
+  geom_vline(xintercept = median(polys$rts_area), linetype = 'dashed')
+
+polys <- polys %>%
+  mutate(size_class = case_when(rts_area <= mean(rts_area) ~ 'Small RTS',
+                               rts_area > mean(rts_area) ~ 'Other'),)
+
+rts_size_performance_summary <- polys %>%
+  as_tibble() %>%
+  group_by(size_class) %>%
+  summarise(iou_mean = mean(mean_iou),
+            iou_sd = sd(mean_iou),
+            iou_median = median(mean_iou),
+            iou_min = min(mean_iou),
+            iou_max = max(mean_iou))
+
+polys <- polys %>%
+  mutate(expected_performance = case_when(
+    size_class == 'Small RTS' & mean_iou > filter(rts_size_performance_summary, size_class == 'Other')$iou_mean ~ 'High',
+     size_class == 'Other' & mean_iou < filter(rts_size_performance_summary, size_class == 'Small RTS')$iou_mean ~ 'Low',
+    TRUE ~ 'Expected'))
+
+ggplot(polys %>%
+         filter(size_class == 'Small RTS'), 
+       aes(x = size_class, y = mean_iou)) +
+  geom_violin()
+
+ggplot(polys %>%
+         filter(size_class == 'Small RTS'), 
+       aes(x = mean_iou, fill = expected_performance)) +
+  geom_histogram(bins = 50)
+
+ggplot(polys, aes(x = rts_area, y = mean_iou, color = expected_performance, shape = imagery)) +
+  geom_point(size = 1) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'IoU') +
+  theme_bw() +
+  theme(legend.title = element_blank()) + 
+  coord_cartesian(ylim = c(0, 1))
+```
+
