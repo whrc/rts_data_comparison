@@ -27,6 +27,7 @@ library(jsonlite)
 library(smoothr)
 library(emmeans)
 library(nlstools)
+library(Ryacas)
 library(tidyverse)
 ```
 
@@ -50,6 +51,27 @@ make_my_dir <- function(output_dir) {
 }
 ```
 
+### pred_from_googledrive
+
+```{r, include = FALSE}
+pred_from_googledrive <- function(name, id, drive_resource, directory) {
+  current <- as_dribble(id)
+  make_my_dir(directory)
+  filepath = paste0(directory, name)
+  
+  if (!file.exists(filepath)) {
+    print(filepath)
+    dl <- drive_download(
+      current,
+      path = filepath)
+  }
+  
+  raster <- rast(filepath)
+  names(raster) <- c('prediction', 'validation')
+  return(raster)
+}
+```
+
 ### rast_from_googledrive
 
 ```{r, include = FALSE}
@@ -66,7 +88,6 @@ rast_from_googledrive <- function(name, id, drive_resource, directory) {
   }
   
   raster <- rast(filepath)
-  names(raster) <- c('prediction', 'validation')
   return(raster)
 }
 ```
@@ -235,6 +256,26 @@ avg_precision <- function(recall, precision) {
 }
 ```
 
+### get_rast_id
+
+```{r, echo = FALSE}
+get_rast_id <- function(raster) {
+  id <- first(str_split(last(str_split(sources(raster), 
+                                       '/')[[1]]), 
+                        '\\.')[[1]])
+  return(id)
+}
+```
+
+### eval_expression
+
+```{r, echo = FALSE}
+eval_expression <- function(expression, x) {
+  return(eval(expression))
+}
+```
+
+
 ## Prep Plot Variables
 
 ```{r, echo = FALSE}
@@ -277,11 +318,41 @@ maxar_pred_files <- drive_ls('https://drive.google.com/drive/folders/1TNRSVgLRhK
 
 maxar_preds <- maxar_pred_files %>%
   pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/predictions-20230601-161139-04062023/')
+    \(name, id, drive_resource, directory) pred_from_googledrive(name, id, drive_resource, './data/maxar/predictions-20230601-161139-04062023/')
     )
 
 rm(maxar_pred_files)
 ```
+
+Input Data:
+
+```{r, include = FALSE}
+maxar_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/10TRi-b8cL4wF2PwEx-3JlFHjb_bzPNZP',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+maxar_input_1 <- maxar_input_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/valtest_yg30_05_2023/')
+    )
+
+
+maxar_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/10d9DRLe_8VK2DOtPp-sVpKBQt2YL6HSV',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+maxar_input_2 <- maxar_input_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/valtest_nitze30_05_2023/')
+    )
+
+maxar_input <- c(maxar_input_1, maxar_input_2)
+ids <- map_chr(maxar_input, ~ get_rast_id(.x))
+names(maxar_input) <- ids
+
+rm(maxar_input_files, maxar_input_1, maxar_input_2)
+```
+
 
 ### Planet GeoTiffs
 
@@ -307,11 +378,41 @@ planet_pred_files <- drive_ls('https://drive.google.com/drive/folders/1b1msmrdHm
 
 planet_preds <- planet_pred_files %>%
   pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/predictions-20230604-211027-p04062023/')
+    \(name, id, drive_resource, directory) pred_from_googledrive(name, id, drive_resource, './data/planet/predictions-20230604-211027-p04062023/')
     )
 
 rm(planet_pred_files)
 ```
+
+Input Data:
+
+```{r, include = FALSE}
+planet_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-4qJHIwv5yHid100syS_X1O118YqaDkR',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+planet_input_1 <- planet_input_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/valtest_yg_01_06_2023/')
+    )
+
+
+planet_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-5clNBqZ7vOJusY76civl9nEKrN4GXlp',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+planet_input_2 <- planet_input_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/valtest_nitze_01_06_2023/')
+    )
+
+planet_input <- c(planet_input_1, planet_input_2)
+ids <- map_chr(planet_input, ~ get_rast_id(.x))
+names(planet_input) <- ids
+
+rm(planet_input_files, planet_input_1, planet_input_2)
+```
+
 
 ### Sentinel GeoTiffs
 
@@ -337,10 +438,39 @@ sentinel_pred_files <- drive_ls('https://drive.google.com/drive/folders/1RfSjwUP
 
 sentinel_preds <- sentinel_pred_files %>%
   pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-20220605-000543-p05062023/')
+    \(name, id, drive_resource, directory) pred_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-20220605-000543-p05062023/')
     )
 
 rm(sentinel_pred_files)
+```
+
+Input Data:
+
+```{r, include = FALSE}
+sentinel_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-HtUnP90-MfE1TBaqBQOteVzNs5unmGH',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+sentinel_input_1 <- sentinel_input_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel/valtest_yg_02_06_2023/')
+    )
+
+
+sentinel_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-KkzrqhSc8siv09tsj2TfpuhOtADYDD_',
+                             pattern = 'tif$') %>%
+  arrange(name)
+
+sentinel_input_2 <- sentinel_input_files %>%
+  pmap(
+    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel/valtest_nitze_02_06_2023/')
+    )
+
+sentinel_input <- c(sentinel_input_1, sentinel_input_2)
+ids <- map_chr(sentinel_input, ~ get_rast_id(.x))
+names(sentinel_input) <- ids
+
+rm(sentinel_input_files, sentinel_input_1, sentinel_input_2)
 ```
 
 
@@ -833,8 +963,6 @@ planet_iou_ci <- newdata %>%
           as_tibble()) %>%
   select(rts_area, prediction = Median, lwr = `2.5%`, upr = `97.5%`) %>%
   mutate(predict = predict(planet_iou_nls, newdata),
-         predict_lwr = predict - (upr - lwr)/2,
-         predict_upr = predict + (upr - lwr)/2,
          predict_lwr = planet_iou_boot[["bootCI"]][2, 2] * rts_area / (planet_iou_boot[["bootCI"]][1, 3] + rts_area),
          predict_upr = planet_iou_boot[["bootCI"]][2, 3] * rts_area / (planet_iou_boot[["bootCI"]][1, 2] + rts_area))
 ```
@@ -849,10 +977,33 @@ sentinel_iou_ci <- newdata %>%
           as_tibble()) %>%
   select(rts_area, prediction = Median, lwr = `2.5%`, upr = `97.5%`) %>%
   mutate(predict = predict(sentinel_iou_nls, newdata),
-         predict_lwr = predict - (upr - lwr)/2,
-         predict_upr = predict + (upr - lwr)/2,
          predict_lwr = sentinel_iou_boot[["bootCI"]][2, 2] * rts_area / (sentinel_iou_boot[["bootCI"]][1, 3] + rts_area),
          predict_upr = sentinel_iou_boot[["bootCI"]][2, 3] * rts_area / (sentinel_iou_boot[["bootCI"]][1, 2] + rts_area))
+```
+
+```{r, echo = FALSE}
+# Add the predictions to `polys`
+predictions <- c(predict(maxar_iou_nls, 
+                         filter(polys, imagery == 'Maxar')),
+                 predict(planet_iou_nls, 
+                         filter(polys, imagery == 'Planet')),
+                 predict(sentinel_iou_nls, 
+                         filter(polys, imagery == 'Sentinel-2')))
+
+polys <- polys %>%
+  mutate(
+    predict = predictions,
+    predict_lwr = case_when(
+      imagery == 'Maxar' ~ maxar_iou_boot[["bootCI"]][2, 2] * rts_area / (maxar_iou_boot[["bootCI"]][1, 3] + rts_area),
+      imagery == 'Planet' ~ planet_iou_boot[["bootCI"]][2, 2] * rts_area / (planet_iou_boot[["bootCI"]][1, 3] + rts_area),
+      imagery == 'Sentinel-2' ~ sentinel_iou_boot[["bootCI"]][2, 2] * rts_area / (sentinel_iou_boot[["bootCI"]][1, 3] + rts_area)
+    ),
+    predict_upr = case_when(
+      imagery == 'Maxar' ~ maxar_iou_boot[["bootCI"]][2, 3] * rts_area / (maxar_iou_boot[["bootCI"]][1, 2] + rts_area),
+      imagery == 'Planet' ~ planet_iou_boot[["bootCI"]][2, 3] * rts_area / (planet_iou_boot[["bootCI"]][1, 2] + rts_area),
+      imagery == 'Sentinel-2' ~ sentinel_iou_boot[["bootCI"]][2, 3] * rts_area / (sentinel_iou_boot[["bootCI"]][1, 2] + rts_area)
+    )
+  )
 ```
 
 Plot the Size/Performance plot
@@ -865,9 +1016,10 @@ iou_ci <- maxar_iou_ci %>%
   rbind(sentinel_iou_ci %>%
           mutate(imagery = 'Sentinel-2'))
 
-rm(maxar_iou_nls, maxar_iou_boot, maxar_iou_predict, maxar_iou_ci,
-   planet_iou_nls, planet_iou_boot, planet_iou_predict, planet_iou_ci,
-   sentinel_iou_nls, sentinel_iou_boot, sentinel_iou_predict, sentinel_iou_ci)
+rm(maxar_iou_nls, maxar_iou_predict, maxar_iou_ci,
+   planet_iou_nls, planet_iou_predict, planet_iou_ci,
+   sentinel_iou_nls, sentinel_iou_predict, sentinel_iou_ci,
+   newdata)
 ```
 
 ```{r, echo = FALSE}
@@ -1026,7 +1178,7 @@ ggplot(polys, aes(x = rts_area)) +
 
 polys <- polys %>%
   mutate(size_class = case_when(rts_area <= mean(rts_area) ~ 'Small RTS',
-                               rts_area > mean(rts_area) ~ 'Other'),)
+                               rts_area > mean(rts_area) ~ 'Other'))
 
 rts_size_performance_summary <- polys %>%
   as_tibble() %>%
@@ -1038,27 +1190,211 @@ rts_size_performance_summary <- polys %>%
             iou_max = max(mean_iou))
 
 polys <- polys %>%
-  mutate(expected_performance = case_when(
-    size_class == 'Small RTS' & mean_iou > filter(rts_size_performance_summary, size_class == 'Other')$iou_mean ~ 'High',
-     size_class == 'Other' & mean_iou < filter(rts_size_performance_summary, size_class == 'Small RTS')$iou_mean ~ 'Low',
-    TRUE ~ 'Expected'))
+  mutate(
+    expected_performance_th = case_when(
+      size_class == 'Small RTS' & mean_iou > filter(
+        rts_size_performance_summary, 
+        size_class == 'Other'
+      )$iou_mean ~ 'High',
+      size_class == 'Other' & mean_iou < filter(
+        rts_size_performance_summary, 
+        size_class == 'Small RTS'
+      )$iou_mean ~ 'Low',
+      TRUE ~ 'Expected'),
+    expected_performance_ci = case_when(
+      mean_iou > predict_upr ~ 'High',
+      mean_iou < predict_lwr ~ 'Low',
+      TRUE ~ 'Expected'
+    )
+  )
+```
 
-ggplot(polys %>%
-         filter(size_class == 'Small RTS'), 
-       aes(x = size_class, y = mean_iou)) +
-  geom_violin()
+```{r, echo = FALSE}
+ggplot(polys, 
+       aes(x = rts_area, 
+           y = mean_iou, 
+           color = expected_performance_th, 
+           shape = imagery)) +
+  geom_point(size = 1) +
+  geom_vline(xintercept = mean(polys$rts_area)) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'IoU') +
+  theme_bw() +
+  theme(legend.title = element_blank()) + 
+  coord_cartesian(ylim = c(0, 1))
+```
 
-ggplot(polys %>%
-         filter(size_class == 'Small RTS'), 
-       aes(x = mean_iou, fill = expected_performance)) +
-  geom_histogram(bins = 50)
+```{r}
+# take the derivative of the non-linear function to find where the slope approaches 0
+maxar_d1 <- D(expression(y = 0.6946343 * x / (237.8842 + x)), name = 'x')
+planet_d1 <- D(expression(y = 0.6908137 * x / (297.8871169 + x)), name = 'x')
+sentinel_d1 <- D(expression(y = 0.6839025 * x / (250.2487224 + x)), name = 'x')
 
-ggplot(polys, aes(x = rts_area, y = mean_iou, color = expected_performance, shape = imagery)) +
+# estimate where the derivative crosses 1e-06
+estimate_grid <- tibble(rts_area = seq(12000, 15000, by = 0.1))
+
+maxar_est <- estimate_grid %>%
+  mutate(iou_est = eval_expression(maxar_d1, rts_area))
+planet_est <- estimate_grid %>%
+  mutate(iou_est = eval_expression(planet_d1, rts_area))
+sentinel_est <- estimate_grid %>%
+  mutate(iou_est = eval_expression(sentinel_d1, rts_area))
+
+maxar_cross <- maxar_est %>%
+  slice(which.min(abs(1e-06-iou_est))) %>%
+  select(rts_area) %>%
+  as.numeric() # find closest to 1e-06
+planet_cross <- planet_est %>%
+  slice(which.min(abs(1e-06-iou_est))) %>%
+  select(rts_area) %>%
+  as.numeric() # find closest to 1e-06
+sentinel_cross <- sentinel_est %>%
+  slice(which.min(abs(1e-06-iou_est))) %>%
+  select(rts_area) %>%
+  as.numeric() # find closest to 1e-06
+
+size_thresholds <- tibble(imagery = c('Maxar', 'Planet', 'Sentinel-2'),
+                          rts_threshold = c(maxar_cross, 
+                                            planet_cross, 
+                                            sentinel_cross))
+
+# plot to confirm
+ggplot(iou_ci, aes(x = rts_area)) +
+  stat_function(fun = function(x) 0.6946343/(237.8842 + x) - 0.6946343 * x/(237.8842 + x)^2) +
+  # geom_line(data = iou_ci, 
+  #           aes(y = d1),
+  #           color = 'gray20') +
+  geom_hline(yintercept = 1e-06,
+             color = 'blue') +
+  geom_vline(xintercept = maxar_cross,
+             color = 'red') +
+  scale_y_continuous(limits = c(9e-07, 1.1e-06)) +
+  scale_x_continuous(limits = c(10000, 15000)) +
+  ggtitle('Maxar')
+
+ggplot(iou_ci, aes(x = rts_area)) +
+  stat_function(fun = function(x) 0.6908137/(297.8871169 + x) - 0.6908137 * x/(297.8871169 + x)^2) +
+  # geom_line(data = iou_ci, 
+  #           aes(y = d1),
+  #           color = 'gray20') +
+  geom_hline(yintercept = 1e-06,
+             color = 'blue') +
+  geom_vline(xintercept = planet_cross,
+             color = 'red') +
+  scale_y_continuous(limits = c(9e-07, 1.1e-06)) +
+  scale_x_continuous(limits = c(10000, 15000)) +
+  ggtitle('Planet')
+
+ggplot(iou_ci, aes(x = rts_area)) +
+  stat_function(fun = function(x) 0.6839025/(250.2487224 + x) - 0.6839025 * x/(250.2487224 + x)^2) +
+  # geom_line(data = iou_ci, 
+  #           aes(y = d1),
+  #           color = 'gray20') +
+  geom_hline(yintercept = 1e-06,
+             color = 'blue') +
+  geom_vline(xintercept = sentinel_cross,
+             color = 'red') +
+  scale_y_continuous(limits = c(9e-07, 1.1e-06)) +
+  scale_x_continuous(limits = c(10000, 15000)) +
+  ggtitle('Sentinel-2')
+
+rm(maxar_d1, planet_d1, sentinel_d1,
+   maxar_est, planet_est, sentinel_est,
+   maxar_cross, planet_cross, sentinel_cross,
+   estimate_grid)
+```
+
+```{r, eval = FALSE}
+polys <- polys %>%
+  mutate(
+    rts_threshold = case_when(
+      imagery == 'Maxar' ~ filter(size_thresholds, imagery == 'Maxar')$rts_threshold,
+      imagery == 'Planet' ~ filter(size_thresholds, imagery == 'Planet')$rts_threshold,
+      imagery == 'Sentinel-2' ~ filter(size_thresholds, imagery == 'Sentinel-2')$rts_threshold
+    ),
+    expected_performance_ci_size = case_when(
+      mean_iou > predict_upr & rts_area <= rts_threshold ~ 'High',
+      mean_iou < predict_lwr & rts_area > rts_threshold ~ 'Low',
+      TRUE ~ 'Expected'
+    ))
+
+ggplot(polys, 
+       aes(x = rts_area, 
+           y = mean_iou, 
+           color = expected_performance_ci, 
+           shape = imagery)) +
   geom_point(size = 1) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'IoU') +
   theme_bw() +
   theme(legend.title = element_blank()) + 
   coord_cartesian(ylim = c(0, 1))
+
+ggplot(polys, 
+       aes(x = rts_area, 
+           y = mean_iou, 
+           color = expected_performance_ci, 
+           shape = imagery)) +
+  geom_ribbon(data = iou_ci,
+            aes(x = rts_area, ymin = predict_lwr, ymax = predict_upr),
+            fill = 'gray50',
+            alpha = 0.2,
+            inherit.aes = FALSE) +
+  geom_line(data = iou_ci, 
+            aes(x = rts_area, y = predict),
+            inherit.aes = FALSE) +
+  geom_point(size = 1) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'IoU') +
+  theme_bw() +
+  theme(legend.title = element_blank()) + 
+  coord_cartesian(ylim = c(0, 1)) +
+  facet_grid(. ~ imagery)
+
+ggplot(polys, 
+       aes(x = rts_area, 
+           y = mean_iou, 
+           color = expected_performance_ci_size, 
+           shape = imagery)) +
+  geom_point(size = 1) +
+  geom_vline(xintercept = filter(size_thresholds, imagery == 'Maxar')$rts_threshold,
+             color = imagery_colors[1]) +
+  geom_vline(xintercept = filter(size_thresholds, imagery == 'Planet')$rts_threshold,
+             color = imagery_colors[2]) +
+  geom_vline(xintercept = filter(size_thresholds, imagery == 'Sentinel-2')$rts_threshold,
+             color = imagery_colors[3]) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'IoU') +
+  theme_bw() +
+  theme(legend.title = element_blank()) + 
+  coord_cartesian(ylim = c(0, 1))
+
+ggplot(polys, 
+       aes(x = rts_area, 
+           y = mean_iou, 
+           color = expected_performance_ci_size, 
+           shape = imagery)) +
+  geom_ribbon(data = iou_ci,
+            aes(x = rts_area, ymin = predict_lwr, ymax = predict_upr),
+            fill = 'gray50',
+            alpha = 0.2,
+            inherit.aes = FALSE) +
+  geom_line(data = iou_ci,
+            aes(x = rts_area, y = predict),
+            inherit.aes = FALSE) +
+  geom_point(size = 1) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'IoU') +
+  theme_bw() +
+  theme(legend.title = element_blank()) + 
+  coord_cartesian(ylim = c(0, 1)) +
+  facet_grid(. ~ imagery)
+
+
+```
+
+
+```{r, echo = FALSE}
+plot(maxar_input[[1]])
 ```
 
