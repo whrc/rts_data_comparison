@@ -8,11 +8,15 @@ output:
 
 ## TODO:
 
--   Figure out how to remove extra influence of multiple RTS within one tile
--   Figure out why my IoU scores don't quite match Yili's
--   Why are there only 69 prediction rasters now?
--   Add confidence intervals to IoU by size smooth lines
--   Get data to investigate why some small RTS are predicted really well
+-   Possible to remove extra influence of multiple RTS within one tile?
+-   Figure out why my IoU scores don't quite match Yili's - I've spent some time on this and am still uncertain.
+-   Are there supposed to be only 69 prediction rasters now?
+
+## Set-Up
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+```
 
 ## Load Libraries
 
@@ -188,7 +192,7 @@ val_as_poly <- function(prediction) {
 
 ### recall_precision
 
-```{r, echo = FALSE}
+```{r, include = FALSE}
 recall_precision <- function(truth, iou, thresholds) {
   
   df <- tibble(ground_truth = truth,
@@ -246,9 +250,7 @@ recall_precision <- function(truth, iou, thresholds) {
 
 ### avg_precision
 
-This is the same as Mean Average Precision for a 1 class model. Otherwise, it would be the mean of the average precision for each class.
-
-```{r, echo = FALSE}
+```{r, include = FALSE}
 avg_precision <- function(recall, precision) {
   
   ap <- sum((recall[1:length(recall) - 1] - recall[2:length(recall)])*precision[1:length(precision) - 1], na.rm = TRUE)
@@ -259,7 +261,7 @@ avg_precision <- function(recall, precision) {
 
 ### get_rast_id
 
-```{r, echo = FALSE}
+```{r, include = FALSE}
 get_rast_id <- function(raster) {
   id <- first(str_split(last(str_split(sources(raster), 
                                        '/')[[1]]), 
@@ -270,15 +272,15 @@ get_rast_id <- function(raster) {
 
 ### eval_expression
 
-```{r, echo = FALSE}
+```{r, include = FALSE}
 eval_expression <- function(expression, x) {
   return(eval(expression))
 }
 ```
 
-### zonal_stats
+### zonal_mean
 
-```{r, echo = FALSE}
+```{r, include = FALSE}
 zonal_mean <- function(rast) {
   
   # unify layer names
@@ -301,20 +303,32 @@ zonal_mean <- function(rast) {
 }
 ```
 
+### trim_outliers
+
+```{r, include = FALSE}
+trim_outliers <- function(x) {
+  x_quant <- quantile(x, probs = c(0.25, 0.75), na.rm = TRUE)
+  x_iqr <- IQR(x, na.rm = TRUE)
+  x_trim <- x[x <= x_quant['75%'] + x_iqr*1.5 & x >= x_quant['25%'] - x_iqr*1.5]
+  return(x_trim)
+}
+```
+
 
 ## Prep Plot Variables
 
-```{r, echo = FALSE}
+```{r}
 imagery_labels <- c('Maxar', 'Planet', 'Sentinel-2')
 imagery_labeller <- c('Maxar' = 'Maxar', 'Planet' = 'Planet', 'Sentinel-2' = 'Sentinel-2')
 imagery_colors <- c('#FFCC00', '#0099AA', '#0000AA')
 ```
 
+
 ## Load Data
 
 ### Polygons
 
-```{r, echo = FALSE}
+```{r}
 rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.shp') %>%
   st_transform(crs = 3413) %>%
   select(id = ID, region, status = Act_or_Gen, code_id, rts_area = Shape_Area, Long)
@@ -322,9 +336,9 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.s
 
 ### Maxar GeoTiffs
 
-20230601-161139-04062023 Parameters:
+20230601-161139-04062023
 
-```{r, echo = FALSE}
+```{r}
 # json metadata
 maxar_metadata <- drive_ls('https://drive.google.com/drive/folders/1TNRSVgLRhKbD-HVeC0HOslkFWzmhJija',
                              pattern = 'json$')
@@ -349,8 +363,6 @@ maxar_preds <- maxar_pred_files %>%
 
 rm(maxar_pred_files)
 ```
-
-Input Data:
 
 ```{r, include = FALSE}
 maxar_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/10TRi-b8cL4wF2PwEx-3JlFHjb_bzPNZP',
@@ -382,9 +394,9 @@ rm(maxar_input_files, maxar_input_1, maxar_input_2)
 
 ### Planet GeoTiffs
 
-20230604-211027-p04062023 Parameters:
+20230604-211027-p04062023
 
-```{r, echo = FALSE}
+```{r}
 # json metadata
 planet_metadata <- drive_ls('https://drive.google.com/drive/folders/1b1msmrdHmfSAFKb2fseg3CNb-JFJH6oj',
                              pattern = 'json$')
@@ -409,8 +421,6 @@ planet_preds <- planet_pred_files %>%
 
 rm(planet_pred_files)
 ```
-
-Input Data:
 
 ```{r, include = FALSE}
 planet_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-4qJHIwv5yHid100syS_X1O118YqaDkR',
@@ -442,9 +452,9 @@ rm(planet_input_files, planet_input_1, planet_input_2)
 
 ### Sentinel GeoTiffs
 
-20220605-000543-p05062023 Parameters:
+20220605-000543-p05062023
 
-```{r, echo = FALSE}
+```{r}
 # json metadata
 sentinel_metadata <- drive_ls('https://drive.google.com/drive/folders/1RfSjwUPFZ2wmLuRt8-AA3XOKgZH2LcLQ',
                              pattern = 'json$')
@@ -469,8 +479,6 @@ sentinel_preds <- sentinel_pred_files %>%
 
 rm(sentinel_pred_files)
 ```
-
-Input Data:
 
 ```{r, include = FALSE}
 sentinel_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-HtUnP90-MfE1TBaqBQOteVzNs5unmGH',
@@ -502,7 +510,7 @@ rm(sentinel_input_files, sentinel_input_1, sentinel_input_2)
 
 ## Get Tile Bounding Boxes
 
-```{r, echo = FALSE}
+```{r}
 maxar_tiles <- maxar_preds %>%
   map_dfr(~ bbox(.x)) %>%
   mutate(imagery = 'Maxar') %>%
@@ -525,7 +533,7 @@ tiles <- maxar_tiles %>%
 rm(maxar_tiles, planet_tiles, sentinel_tiles)
 ```
 
-```{r, echo = FALSE}
+```{r}
 polys <- tiles %>%
   left_join(rts_outlines %>%
               as_tibble() %>%
@@ -539,7 +547,7 @@ rm(tiles)
 
 ## Convert Predictions to Vector
 
-```{r, echo = FALSE}
+```{r}
 maxar_pred_polys <- maxar_preds %>%
   map_dfr(~ pred_as_poly(.x)) %>%
   mutate(imagery = 'Maxar')
@@ -555,7 +563,7 @@ sentinel_pred_polys <- sentinel_preds %>%
 
 Join Prediction Polygons into `polys` SF Dataframe
 
-```{r, echo = FALSE}
+```{r}
 pred_polys <- maxar_pred_polys %>%
   rbind(planet_pred_polys) %>%
   rbind(sentinel_pred_polys)
@@ -571,7 +579,7 @@ rm(maxar_pred_polys, planet_pred_polys, sentinel_pred_polys, pred_polys)
 
 ## Convert Validation to Vector
 
-```{r, echo = FALSE}
+```{r}
 maxar_val_polys <- maxar_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
   mutate(imagery = 'Maxar')
@@ -587,7 +595,7 @@ sentinel_val_polys <- sentinel_preds %>%
 
 Join Validation Polygons into `polys` SF Dataframe
 
-```{r, echo = FALSE}
+```{r}
 val_polys <- maxar_val_polys %>%
   rbind(planet_val_polys) %>%
   rbind(sentinel_val_polys)
@@ -603,7 +611,7 @@ rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 
 ## Interactive Map of Features
 
-```{r, echo = FALSE}
+```{r}
 pal_viridis <- colorFactor("viridis", polys$imagery)
 
 leaflet() %>%
@@ -629,7 +637,7 @@ leaflet() %>%
 
 ### Calculate Intersection and Union
 
-```{r, echo = FALSE}
+```{r}
 polys <- polys %>%
   mutate(rts_int_geometry = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_intersection(...)),
                                   crs = crs(polys)),
@@ -643,24 +651,22 @@ polys <- polys %>%
 
 ### Calculate IoU
 
-```{r, echo = FALSE}
+```{r}
 polys <- polys %>%
   mutate(rts_iou = as.numeric(st_area(rts_int_geometry)/st_area(rts_uni_geometry)),
          bg_iou = as.numeric(st_area(bg_int_geometry)/st_area(bg_uni_geometry)),
          mean_iou = (rts_iou + bg_iou)/2)
 ```
 
-```{r, echo = FALSE}
+```{r}
 iou <- polys %>%
   as_tibble() %>%
   group_by(imagery) %>%
   summarise(mean_iou = round(mean(mean_iou), 2))
+iou
 ```
 
-`r iou`
-
-
-```{r, echo = FALSE}
+```{r, include = FALSE}
 for (i in 1:69) {
   current_data <- polys %>%
     group_by(imagery) %>%
@@ -697,7 +703,7 @@ for (i in 1:69) {
 
 ### Recall-Precision Curves
 
-```{r, echo = FALSE}
+```{r}
 polys <- polys %>%
   mutate(ground_truth = 1)
 
@@ -754,7 +760,7 @@ rm(maxar_rts_rec_pre, planet_rts_rec_pre, sentinel_rts_rec_pre,
 
 ### MAP
 
-```{r, echo = FALSE}
+```{r}
 avg_pre <- rec_pre %>%
   group_by(imagery, class) %>%
   summarise(avg_pre = avg_precision(recall, precision))
@@ -771,7 +777,7 @@ mean_avg_pre <- avg_pre %>%
 
 Precision measures false positives. Recall measures false negatives.
 
-```{r, echo = FALSE}
+```{r}
 arrow_data <- tibble(x = c(0.5, -0.28),
                      xend = c(1, -0.28),
                      y = c(-0.24, 0.5),
@@ -826,7 +832,7 @@ rec_pre_plot
 
 ### Calculate Area
 
-```{r, echo = FALSE}
+```{r}
 polys <- polys %>%
   mutate(rts_area = round(as.numeric(st_area(val_geometry)), 2),
          rts_area_class = round(rts_area, -2))
@@ -898,15 +904,6 @@ rts_summaries <- polys %>%
             max_size = max(rts_area),
             median_size = median(rts_area))
 rts_summaries
-
-ggplot(polys, aes(x = rts_area, fill = yg)) +
-  geom_histogram(position = position_dodge(), bins = 15) +
-  scale_fill_manual(labels = c('Other', 'YG'),
-                     values = c('gray50', 'gray20')) +
-  scale_x_log10(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'Count') +
-  theme_bw() +
-  theme(legend.title = element_blank())
 ```
 
 ### Plot
@@ -917,7 +914,7 @@ This is complicated by the fact that the rts_area column is calculated from the 
 
 Run `nls` models and bootstrap parameters
 
-```{r, echo = FALSE}
+```{r}
 # maxar_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
 #                data = polys %>%
@@ -931,7 +928,7 @@ maxar_iou_nls <- readRDS('./data/models/maxar_iou_nls.RData')
 maxar_iou_boot <- readRDS('./data/models/maxar_iou_boot.RData')
 ```
 
-```{r, echo = FALSE}
+```{r}
 # planet_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
 #                data = polys %>%
@@ -945,7 +942,7 @@ planet_iou_nls <- readRDS('./data/models/planet_iou_nls.RData')
 planet_iou_boot <- readRDS('./data/models/planet_iou_boot.RData')
 ```
 
-```{r, echo = FALSE}
+```{r}
 # sentinel_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
 #                data = polys %>%
@@ -961,11 +958,11 @@ sentinel_iou_boot <- readRDS('./data/models/sentinel_iou_boot.RData')
 
 Bootstrap predictions for plotting the `nls` models
 
-```{r, echo = FALSE}
+```{r}
 newdata <- tibble(rts_area = seq(min(polys$rts_area), max(polys$rts_area), length.out = 200))
 ```
 
-```{r, echo = FALSE}
+```{r}
 # maxar_iou_predict <- nlsBootPredict(maxar_iou_boot, newdata = newdata, interval = 'prediction')
 # saveRDS(maxar_iou_predict, './data/models/maxar_iou_predict.RData')
 
@@ -979,7 +976,7 @@ maxar_iou_ci <- newdata %>%
          predict_upr = maxar_iou_boot[["bootCI"]][2, 3] * rts_area / (maxar_iou_boot[["bootCI"]][1, 2] + rts_area))
 ```
 
-```{r, echo = FALSE}
+```{r}
 # planet_iou_predict <- nlsBootPredict(planet_iou_boot, newdata = newdata, interval = 'prediction')
 # saveRDS(planet_iou_predict, './data/models/planet_iou_predict.RData')
 
@@ -993,7 +990,7 @@ planet_iou_ci <- newdata %>%
          predict_upr = planet_iou_boot[["bootCI"]][2, 3] * rts_area / (planet_iou_boot[["bootCI"]][1, 2] + rts_area))
 ```
 
-```{r, echo = FALSE}
+```{r}
 # sentinel_iou_predict <- nlsBootPredict(sentinel_iou_boot, newdata = newdata, interval = 'prediction')
 # saveRDS(sentinel_iou_predict, './data/models/sentinel_iou_predict.RData')
 
@@ -1007,7 +1004,7 @@ sentinel_iou_ci <- newdata %>%
          predict_upr = sentinel_iou_boot[["bootCI"]][2, 3] * rts_area / (sentinel_iou_boot[["bootCI"]][1, 2] + rts_area))
 ```
 
-```{r, echo = FALSE}
+```{r}
 # Add the predictions to `polys`
 predictions <- c(predict(maxar_iou_nls, 
                          filter(polys, imagery == 'Maxar')),
@@ -1034,7 +1031,7 @@ polys <- polys %>%
 
 Plot the Size/Performance plot
 
-```{r, echo = FALSE}
+```{r}
 iou_ci <- maxar_iou_ci %>%
   mutate(imagery = 'Maxar') %>%
   rbind(planet_iou_ci %>%
@@ -1048,7 +1045,7 @@ rm(maxar_iou_nls, maxar_iou_predict, maxar_iou_ci,
    newdata)
 ```
 
-```{r, echo = FALSE}
+```{r}
 ggplot(polys, aes(x = rts_area, y = mean_iou, color = imagery)) +
   geom_point(size = 1) +
   # geom_smooth(method="nls",
@@ -1076,22 +1073,20 @@ ggplot(polys, aes(x = rts_area, y = mean_iou, color = imagery)) +
 
 ## Active vs. General RTS Performance
 
-I need to figure out how to deal with polygons that are very close together and show up in the same tile, otherwise this join results in duplicates.
-
-```{r, echo = FALSE}
+```{r}
 iou_by_rts_status <- polys %>%
   as_tibble() %>%
   group_by(imagery, status) %>%
   summarise(mean_iou = mean(mean_iou))
 ```
 
-```{r, echo = FALSE}
+```{r}
 rts_status_lm <- lm(mean_iou ~ imagery * status,
                              data = polys)
 rts_status_contrasts <- emmeans(rts_status_lm,
         pairwise ~ status | imagery,
         adjust = 'tukey')
-rts_status_contrasts
+
 rts_status_pvalues <- tibble(
   imagery = summary(rts_status_contrasts)$contrasts$imagery,
   p_val = summary(rts_status_contrasts)$contrasts$p.value,
@@ -1112,7 +1107,7 @@ rts_status_pvalues
 
 It is possible to get rid of the inner panel borders, if I decide that looks better: <https://stackoverflow.com/questions/46220242/ggplot2-outside-panel-border-when-using-facet>
 
-```{r, echo = FALSE}
+```{r}
 ggplot(polys, 
        aes(x = status, 
            y = mean_iou, 
@@ -1150,14 +1145,14 @@ ggplot(polys,
         strip.placement = "outside")
 ```
 
-```{r, echo = FALSE}
+```{r}
 poly_status_size_summary <- polys %>%
   group_by(imagery, status, rts_area_class) %>%
   summarise(iou_mean = mean(mean_iou),
             iou_se = sd(mean_iou)/sqrt(n()))
 ```
 
-```{r, echo = FALSE}
+```{r}
 ggplot(poly_status_size_summary, 
        aes(x = rts_area_class, y = iou_mean, color = imagery)) +
   geom_point(size = 2, aes(shape = status)) +
@@ -1186,9 +1181,9 @@ ggplot(poly_status_size_summary,
 
 ## Drivers of Unexpected RTS Prediction Performance
 
-### Threshold Approach
+### Unexpected Performance: Threshold Approach
 
-```{r, echo = FALSE}
+```{r}
 polys %>%
   as_tibble() %>%
   summarise(mean_size = mean(rts_area),
@@ -1237,7 +1232,7 @@ polys <- polys %>%
   )
 ```
 
-```{r, echo = FALSE}
+```{r}
 ggplot(polys, 
        aes(x = rts_area, 
            y = mean_iou, 
@@ -1253,9 +1248,12 @@ ggplot(polys,
   coord_cartesian(ylim = c(0, 1))
 ```
 
-### Confidence Interval Approach
+### Unexpected Performance: Confidence Interval Approach
 
-```{r}
+This approach first uses the 95% CI of the model parameters to determine whether RTS features were predicted better or worse than expected based on the model. Next, the threshold at which RTS size doesn't impact IoU is determined from where the slope of the model approaches 0 (currently using slope < 1e-06) for each imagery type. RTS features smaller than this threshold that were predicted better than expected are analyzed later to determine why some small RTS can be identified from the imagery.
+
+
+```{r, include = FALSE}
 # take the derivative of the non-linear function to find where the slope approaches 0
 maxar_d1 <- D(expression(y = 0.6946343 * x / (237.8842 + x)), name = 'x')
 planet_d1 <- D(expression(y = 0.6908137 * x / (297.8871169 + x)), name = 'x')
@@ -1335,7 +1333,7 @@ rm(maxar_d1, planet_d1, sentinel_d1,
    estimate_grid)
 ```
 
-```{r, eval = FALSE}
+```{r}
 polys <- polys %>%
   mutate(
     rts_threshold = case_when(
@@ -1425,13 +1423,11 @@ ggplot(polys,
   theme(legend.title = element_blank()) + 
   coord_cartesian(ylim = c(0, 1)) +
   facet_grid(. ~ imagery)
-
-
 ```
 
 ### Zonal Statistics
 
-```{r, echo = FALSE}
+```{r}
 zonal_stats <- maxar_input %>%
   map_dfr(~ zonal_mean(.x)) %>%
   mutate(imagery = 'Maxar') %>%
@@ -1441,19 +1437,23 @@ zonal_stats <- maxar_input %>%
   rbind.data.frame(sentinel_input %>%
                      map_dfr(~ zonal_mean(.x)) %>%
                      mutate(imagery = 'Sentinel-2')) %>%
-  select(id,
-         imagery, 
-         rts_class = RTSlabel, 
-         r, g, b, 
-         nir = planetNIR, 
+  group_by(imagery) %>%
+  mutate(rts_class = factor(case_when(RTSlabel == 0 ~ 'bg',
+                                      RTSlabel == 1 ~ 'rts')),
+         r = r/max(r, na.rm = TRUE),
+         g = g/max(g, na.rm = TRUE),
+         b = b/max(b, na.rm = TRUE),
+         luminance = 0.299*r + 0.587*g + 0.114*b,
+         planetNIR = planetNIR/max(planetNIR, na.rm = TRUE)) %>% # luminance equation from: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
+  select(id, imagery, rts_class,
+         r, g, b, luminance, nir = planetNIR, 
          ndvi, ndwi, 
          relative_elevation, shaded_relief) %>%
-  mutate(rts_class = factor(case_when(rts_class == 0 ~ 'bg',
-                                      rts_class == 1 ~ 'rts'))) %>%
   pivot_wider(names_from = 'rts_class', values_from = c(r:shaded_relief)) %>%
   mutate(r_delta = (r_rts - r_bg)/r_bg,
          b_delta = (b_rts - b_bg)/b_bg,
          g_delta = (g_rts - g_bg)/g_bg,
+         luminance_delta = (luminance_rts - luminance_bg)/luminance_bg,
          nir_delta = (nir_rts - nir_bg)/nir_bg,
          ndvi_delta = (ndvi_rts - ndvi_bg)/ndvi_bg,
          ndwi_delta = (ndwi_rts - ndwi_bg)/ndwi_bg,
@@ -1471,205 +1471,326 @@ zonal_stats <- maxar_input %>%
              by = c('id', 'imagery'))
 ```
 
+```{r}
+# calculate figure y-limits by hand
+# (1.5*IQR is the upper and lower whisker limit; 1.05 is the default axis expansion by ggplot)
+zonal_stats_limits <- zonal_stats %>%
+  select(id:shaded_relief_delta, expected_performance_ci_size) %>%
+  pivot_longer(r_bg:shaded_relief_delta,  names_to = 'variable', values_to = 'value') %>%
+group_by(imagery, expected_performance_ci_size, variable) %>%
+  summarise(lwr = min(trim_outliers(value), na.rm = TRUE),
+            upr = max(trim_outliers(value), na.rm = TRUE)) %>%
+  mutate(lim_lwr = upr - (upr - lwr)*1.05,
+         lim_upr = lwr + (upr - lwr)*1.05) %>%
+  group_by(variable) %>%
+  summarise(lwr = min(lim_lwr),
+            upr = max(lim_upr))
+```
+
 ### Plot
+
+```{r}
+ggplot(zonal_stats, aes(x = r_rts, color = imagery)) +
+  geom_freqpoly() +
+  scale_color_manual(values = imagery_colors) +
+  theme_bw()
+```
 
 RTS Values
 
-```{r, echo = FALSE}
+```{r}
 red_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = r_rts, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'r_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 red_fig
 
 green_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = g_rts, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'g_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 green_fig
 
 blue_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = b_rts, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'b_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 blue_fig
+
+luminance_fig <- ggplot(zonal_stats, 
+       aes(x = expected_performance_ci_size, 
+           y = luminance_rts, 
+           color = expected_performance_ci_size)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
+                     guide = 'none') +
+  facet_grid(. ~ imagery, scales = 'free_y') +
+  theme_bw() +
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'luminance_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
+luminance_fig
 
 nir_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = nir_rts, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'nir_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 nir_fig
 
 ndvi_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = ndvi_rts, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'ndvi_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 ndvi_fig
 
 ndwi_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = ndwi_rts, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'ndwi_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 ndwi_fig
 
 elev_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = relative_elevation_rts, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'relative_elevation_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 elev_fig
+
 
 relief_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = shaded_relief_rts, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'shaded_relief_rts') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 relief_fig
 ```
 
 RTS-bg Delta
 
-```{r, echo = FALSE}
+```{r}
 red_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = r_delta, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'r_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 red_fig
 
 green_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = g_delta, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'g_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 green_fig
 
 blue_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = b_delta, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'b_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 blue_fig
+
+luminance_fig <- ggplot(zonal_stats, 
+       aes(x = expected_performance_ci_size, 
+           y = luminance_delta, 
+           color = expected_performance_ci_size)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
+                     guide = 'none') +
+  facet_grid(. ~ imagery, scales = 'free_y') +
+  theme_bw() +
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'luminance_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
+luminance_fig
 
 nir_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = nir_delta, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'nir_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 nir_fig
 
 ndvi_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = ndvi_delta, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'ndvi_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 ndvi_fig
 
 ndwi_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = ndwi_delta, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'ndwi_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 ndwi_fig
 
 elev_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = relative_elevation_delta, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'relative_elevation_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 elev_fig
+
 
 relief_fig <- ggplot(zonal_stats, 
        aes(x = expected_performance_ci_size, 
            y = shaded_relief_delta, 
            color = expected_performance_ci_size)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                      guide = 'none') +
   facet_grid(. ~ imagery, scales = 'free_y') +
   theme_bw() +
-  theme(axis.title.x = element_blank())
+  theme(axis.title.x = element_blank()) + 
+  coord_cartesian(ylim = zonal_stats_limits %>%
+                    filter(variable == 'shaded_relief_delta') %>% # rlang::as_name(??$mapping$y)
+                    select(lwr, upr) %>%
+                    as_vector())
 relief_fig
 ```
 
