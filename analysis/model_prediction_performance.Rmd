@@ -10,8 +10,8 @@ output:
 
 -   Possible to remove extra influence of multiple RTS within one tile?
 -   Figure out why my IoU scores don't quite match Yili's - I've spent some time on this and am still uncertain.
--   Are there supposed to be only 69 prediction rasters now?
--   Get faceted boxplots working with new data format (or go back to old version)
+-   Facet the maps of the polygons instead of looping over them
+-   Add legend for the validation and prediction polygons
 -   Add statistical tests for boxplots
 -   Shapley analysis
 
@@ -32,10 +32,12 @@ library(viridis)
 library(googledrive)
 library(jsonlite)
 library(smoothr)
+library(tidymodels)
 library(emmeans)
 library(nlstools)
 library(Ryacas)
 library(ggnewscale)
+library(egg)
 library(tidyverse)
 ```
 
@@ -325,6 +327,19 @@ trim_outliers <- function(x) {
 }
 ```
 
+### assign_conf_stars
+
+```{r, include = FALSE}
+assign_conf_stars <- function(x) {
+  case_when(x > 0.1 ~ '',
+            x < 0.1 ~ '.',
+            x > 0.01 ~ '*',
+            x > 0.001 ~ '**',
+            x > 0.0001 ~ '***',
+            TRUE ~ '****')
+}
+  
+```
 
 ## Prep Plot Variables
 
@@ -677,16 +692,74 @@ iou <- polys %>%
 iou
 ```
 
-```{r, include = FALSE}
+```{r}
+input_ids <- tibble(maxar = map_chr(maxar_input, ~ get_rast_id(.x)),
+                    planet = map_chr(planet_input, ~ get_rast_id(.x)),
+                    sentinel = map_chr(sentinel_input, ~ get_rast_id(.x)))
+
+if (all(input_ids$maxar == input_ids$planet) & all(input_ids$maxar == input_ids$sentinel)) {
+  input_ids <- input_ids %>%
+    select(id = maxar)
+}
+```
+
+```{r}
 for (i in 1:69) {
+  # get polygon data
   current_data <- polys %>%
     group_by(imagery) %>%
     slice(i)
+  
+  # get polygon ID
   current_id <- unique(current_data$id)
-  labeller <- function(variable, value){
-    return(hospital_names[value])
-  }
+  
+  # get index of polygon ID in the input data
+  idx <- which(input_ids$id == current_id)
+  
+  # prep RGB data
+  rgb_df <- stretch(subset(maxar_input[[idx]], 1:3),
+                     minv = 0,
+                     maxv = 1,
+                     minq = 0.01,
+                     maxq = 1)%>%
+    as.data.frame(stretch,
+                  xy = TRUE) %>%
+    rename(r = 3, g = 4, b = 5) %>%
+    filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
+    mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)),
+           imagery = 'Maxar') %>%
+    rbind.data.frame(stretch(subset(planet_input[[idx]], 1:3),
+                     minv = 0,
+                     maxv = 1,
+                     minq = 0.01,
+                     maxq = 1)%>%
+    as.data.frame(stretch,
+                  xy = TRUE) %>%
+    rename(r = 3, g = 4, b = 5) %>%
+    filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
+    mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)),
+           imagery = 'Planet')) %>%
+    rbind.data.frame(stretch(subset(sentinel_input[[idx]], 1:3),
+                     minv = 0,
+                     maxv = 1,
+                     minq = 0.01,
+                     maxq = 1)%>%
+    as.data.frame(stretch,
+                  xy = TRUE) %>%
+    rename(r = 3, g = 4, b = 5) %>%
+    filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
+    mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)),
+           imagery = 'Sentinel-2')) %>%
+    full_join(current_data %>%
+                select(imagery, mean_iou),
+              by = 'imagery')
+  
   print(ggplot(data = current_data) +
+          geom_raster(data = rgb_df, 
+                      aes(x = x, y = y, fill = color.hex), 
+                      inherit.aes = FALSE) +
+          scale_fill_manual(values = levels(rgb_df$color.hex),
+                            guide = 'none') +
           geom_sf(aes(geometry = bbox_geometry),
                   color = 'black',
                   fill = 'transparent') +
@@ -698,13 +771,13 @@ for (i in 1:69) {
                   color = 'red',
                   fill = 'transparent',
                   linewidth = 0.5) +
-          facet_grid(.~ imagery + paste('mIoU:', mean_iou)) +
+          facet_grid(.~ imagery + paste('mIoU:', round(mean_iou, 2))) +
           ggtitle(paste('ID:', current_id)) +
           theme(axis.title = element_blank()) +
           theme_bw()
           )
   
-  rm(current_data, current_id, labeller)
+  rm(current_data, current_id, idx, rgb_df)
   
 }
 ```
@@ -787,6 +860,8 @@ mean_avg_pre <- avg_pre %>%
 ### Plot
 
 Precision measures false positives. Recall measures false negatives.
+
+This figure will only be interesting once we have added in negative training data.
 
 ```{r}
 arrow_data <- tibble(x = c(0.5, -0.28),
@@ -1106,11 +1181,7 @@ rts_status_pvalues <- tibble(
   label_y_pos = rep(0.95, 3)
 ) %>%
   mutate(p_label = paste0('p-value = ', round(p_val, 3)),
-         star_label = case_when(p_val > 0.05 ~ '',
-                                p_val > 0.01 ~ '*',
-                                p_val > 0.001 ~ '**',
-                                p_val > 0.0001 ~ '***',
-                                TRUE ~ '****'))
+         star_label = assign_conf_stars(p_val))
 rts_status_pvalues
 ```
 
@@ -1192,74 +1263,7 @@ ggplot(poly_status_size_summary,
 
 ## Drivers of Unexpected RTS Prediction Performance
 
-### Unexpected Performance: Threshold Approach
-
-```{r}
-polys %>%
-  as_tibble() %>%
-  summarise(mean_size = mean(rts_area),
-            min_size = min(rts_area),
-            max_size = max(rts_area),
-            median_size = median(rts_area),
-            sd_size = sd(rts_area))
-
-ggplot(polys, aes(x = rts_area)) +
-  geom_histogram(bins = 50) +
-  geom_vline(xintercept = mean(polys$rts_area)) +
-  geom_vline(xintercept = median(polys$rts_area), linetype = 'dashed')
-
-polys <- polys %>%
-  mutate(size_class = case_when(rts_area <= mean(rts_area) ~ 'Small RTS',
-                               rts_area > mean(rts_area) ~ 'Other'))
-
-rts_size_performance_summary <- polys %>%
-  as_tibble() %>%
-  group_by(size_class) %>%
-  summarise(iou_mean = mean(mean_iou),
-            iou_sd = sd(mean_iou),
-            iou_median = median(mean_iou),
-            iou_min = min(mean_iou),
-            iou_max = max(mean_iou))
-
-polys <- polys %>%
-  mutate(
-    expected_performance_th = factor(case_when(
-      size_class == 'Small RTS' & mean_iou > filter(
-        rts_size_performance_summary, 
-        size_class == 'Other'
-      )$iou_mean ~ 'High',
-      size_class == 'Other' & mean_iou < filter(
-        rts_size_performance_summary, 
-        size_class == 'Small RTS'
-      )$iou_mean ~ 'Low',
-      TRUE ~ 'Expected'),
-    levels = c('High', 'Expected', 'Low')),
-    expected_performance_ci = factor(case_when(
-      mean_iou > predict_upr ~ 'High',
-      mean_iou < predict_lwr ~ 'Low',
-      TRUE ~ 'Expected'
-    ),
-    levels = c('High', 'Expected', 'Low'))
-  )
-```
-
-```{r}
-ggplot(polys, 
-       aes(x = rts_area, 
-           y = mean_iou, 
-           color = expected_performance_th, 
-           shape = imagery)) +
-  geom_point(size = 1) +
-  geom_vline(xintercept = mean(polys$rts_area)) +
-  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'IoU') +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000')) +
-  theme_bw() +
-  theme(legend.title = element_blank()) + 
-  coord_cartesian(ylim = c(0, 1))
-```
-
-### Unexpected Performance: Confidence Interval Approach
+### Classify Features Using Confidence Interval Approach
 
 This approach first uses the 95% CI of the model parameters to determine whether RTS features were predicted better or worse than expected based on the model. Next, the threshold at which RTS size doesn't impact IoU is determined from where the slope of the model approaches 0 (currently using slope < 1e-06) for each imagery type. RTS features smaller than this threshold that were predicted better than expected are analyzed later to determine why some small RTS can be identified from the imagery.
 
@@ -1352,6 +1356,13 @@ polys <- polys %>%
       imagery == 'Planet' ~ filter(size_thresholds, imagery == 'Planet')$rts_threshold,
       imagery == 'Sentinel-2' ~ filter(size_thresholds, imagery == 'Sentinel-2')$rts_threshold
     ),
+    expected_performance_ci = factor(
+      case_when(
+        mean_iou > predict_upr ~ 'High',
+        mean_iou < predict_lwr ~ 'Low',
+        TRUE ~ 'Expected'
+      ),
+      levels = c('High', 'Expected', 'Low')),
     expected_performance_ci_size = factor(
       case_when(
         mean_iou > predict_upr & rts_area <= rts_threshold ~ 'High',
@@ -1427,9 +1438,13 @@ ggplot(polys,
             aes(x = rts_area, y = predict),
             inherit.aes = FALSE) +
   geom_point(size = 1) +
+  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000')) +
+  new_scale('color') +
+  geom_vline(data = size_thresholds,
+             aes(xintercept = rts_threshold, color = imagery)) +
+  scale_color_manual(values = imagery_colors) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'IoU') +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000')) +
   theme_bw() +
   theme(legend.title = element_blank()) + 
   coord_cartesian(ylim = c(0, 1)) +
@@ -1496,12 +1511,34 @@ zonal_stats <- input_data %>%
                select(c('id', 'imagery', 'region', 'status', 'rts_area',
                         'mean_iou', 'name_long', 'yg',
                         'predict', 'predict_lwr', 'predict_upr',
-                        'size_class', 'rts_threshold',
-                        'expected_performance_th',
+                        'rts_threshold',
                         'expected_performance_ci',
                         'expected_performance_ci_size')),
              by = c('id', 'imagery'))
 ```
+
+```{r}
+my_model <- function(df) {
+  linear_reg() %>%
+  fit(r_mean ~ expected_performance_ci_size, 
+            data = df)
+model_output <- tidy(model)
+return(model_output)
+}
+# contrasts <- as_tibble(emmeans(model,
+#                                pairwise ~ expected_performance_ci_size,
+#                                adjust = 'tukey')$contrasts) %>%
+#   mutate(star_label = assign_conf_stars(p.value)) %>%
+#   select(contrast, estimate, se = SE, p_value = p.value, star_label)
+```
+
+```{r}
+# model_output <- zonal_stats %>%
+#   group_by(rts_class, imagery) %>%
+#   nest()
+```
+
+### Plot
 
 ```{r}
 # calculate figure y-limits by hand
@@ -1519,638 +1556,86 @@ group_by(imagery, expected_performance_ci_size, rts_class, variable) %>%
             upr = max(lim_upr))
 ```
 
-### Plot
+These plots summarize the input data values (mean or standard deviation) in RTS cells, background cells, and the normalized difference between the two (Delta = `(RTS - Background)/Background`). Most of the input layer names should be self explanatory, but for the others:
 
-```{r, include = FALSE}
-ggplot(input_data, aes(x = r, color = imagery)) +
-  geom_freqpoly(binwidth = 0.05) +
-  scale_color_manual(values = imagery_colors) +
-  theme_bw()
+lum = [luminance](https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color) = `0.299*r + 0.587*g + 0.114*b` 
 
-ggplot(input_data, aes(x = g, color = imagery)) +
-  geom_freqpoly(binwidth = 0.05) +
-  scale_color_manual(values = imagery_colors) +
-  theme_bw()
+sr = shaded relief
 
-ggplot(input_data, aes(x = b, color = imagery)) +
-  geom_freqpoly(binwidth = 0.05) +
-  scale_color_manual(values = imagery_colors) +
-  theme_bw()
+```{r, warning = FALSE}
+for (var in colnames(zonal_stats %>%
+                          ungroup() %>%
+                          select(r_mean:sr_sd))) {
+  
+  rts_fig <- ggplot(zonal_stats %>%
+                      filter(rts_class == 'RTS'), 
+                    aes(x = expected_performance_ci_size, 
+                        y = .data[[var]], 
+                        color = expected_performance_ci_size)) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme_bw() +
+    theme(axis.title.x = element_blank()) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == var & rts_class == 'RTS') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  delta_fig <- ggplot(zonal_stats %>%
+                        filter(rts_class == 'Delta'), 
+                      aes(x = expected_performance_ci_size, 
+                          y = .data[[var]], 
+                          color = expected_performance_ci_size)) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme_bw() +
+    theme(axis.title.x = element_blank()) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == var & rts_class == 'Delta') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  bg_fig <- ggplot(zonal_stats %>%
+                     filter(rts_class == 'Background'), 
+                   aes(x = expected_performance_ci_size, 
+                       y = .data[[var]], 
+                       color = expected_performance_ci_size)) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme_bw() +
+    theme(axis.title.x = element_blank()) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == var & rts_class == 'Background') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  ggarrange(rts_fig +
+                theme(axis.text.x = element_blank(),
+                      axis.ticks.x = element_blank(),
+                      axis.title.y = element_blank()),
+              delta_fig +
+                theme(strip.background.x = element_blank(),
+                      strip.text.x = element_blank(),
+                      axis.text.x = element_blank(),
+                      axis.ticks.x = element_blank()),
+              bg_fig +
+                theme(strip.background.x = element_blank(),
+                      strip.text.x = element_blank(),
+                      axis.ticks.x = element_blank(),
+                      axis.title.y = element_blank()),
+              ncol = 1)
+
+}
 ```
 
-Need to see if it's possible to implement different `ylim`s for each row of facets. Uwe's answer [here](https://stackoverflow.com/questions/51735481/ggplot2-change-axis-limits-for-each-individual-facet-panel) has an example which uses scale_y_continuous, but I can't use scale_y_continuous, as it will clip the data prior to the calculation of the boxplot stats.
 
-```{r}
-red_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = r_mean, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(rts_class ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank())# + 
-  # coord_cartesian(ylim = zonal_stats_limits %>%
-  #                   filter(variable == 'r_mean_rts') %>% # rlang::as_name(??$mapping$y)
-  #                   select(lwr, upr) %>%
-  #                   as_vector())
-red_fig
-```
-
-RTS Mean Values
-
-```{r}
-red_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = r_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'r_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-red_fig
-
-green_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = g_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'g_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-green_fig
-
-blue_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = b_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'b_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-blue_fig
-
-lum_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = lum_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'lum_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-lum_fig
-
-nir_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = nir_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'nir_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-nir_fig
-
-ndvi_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = ndvi_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'ndvi_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-ndvi_fig
-
-ndwi_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = ndwi_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'ndwi_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-ndwi_fig
-
-elev_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = elev_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'elev_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-elev_fig
-
-
-relief_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = sr_mean_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'sr_mean_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-relief_fig
-```
-
-RTS SD Values
-
-```{r}
-red_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = r_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'r_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-red_fig
-
-green_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = g_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'g_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-green_fig
-
-blue_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = b_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'b_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-blue_fig
-
-lum_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = lum_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'lum_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-lum_fig
-
-nir_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = nir_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'nir_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-nir_fig
-
-ndvi_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = ndvi_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'ndvi_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-ndvi_fig
-
-ndwi_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = ndwi_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'ndwi_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-ndwi_fig
-
-elev_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = elev_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'elev_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-elev_fig
-
-
-relief_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = sr_sd_rts, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'sr_sd_rts') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-relief_fig
-```
-
-RTS-bg Delta
-
-```{r}
-red_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = r_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'r_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-red_fig
-
-green_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = g_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'g_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-green_fig
-
-blue_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = b_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'b_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-blue_fig
-
-lum_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = lum_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'lum_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-lum_fig
-
-nir_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = nir_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'nir_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-nir_fig
-
-ndvi_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = ndvi_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'ndvi_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-ndvi_fig
-
-ndwi_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = ndwi_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'ndwi_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-ndwi_fig
-
-elev_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = elev_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'elev_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-elev_fig
-
-
-relief_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = sr_mean_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'sr_mean_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-relief_fig
-```
-
-RTS-bg SD Delta
-
-```{r}
-red_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = r_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'r_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-red_fig
-
-green_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = g_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'g_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-green_fig
-
-blue_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = b_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'b_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-blue_fig
-
-lum_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = lum_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'lum_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-lum_fig
-
-nir_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = nir_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'nir_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-nir_fig
-
-ndvi_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = ndvi_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'ndvi_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-ndvi_fig
-
-ndwi_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = ndwi_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'ndwi_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-ndwi_fig
-
-elev_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = elev_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'elev_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-elev_fig
-
-
-relief_fig <- ggplot(zonal_stats, 
-       aes(x = expected_performance_ci_size, 
-           y = sr_sd_delta, 
-           color = expected_performance_ci_size)) +
-  geom_boxplot(outlier.shape = NA) +
-  scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                     guide = 'none') +
-  facet_grid(. ~ imagery, scales = 'free_y') +
-  theme_bw() +
-  theme(axis.title.x = element_blank()) + 
-  coord_cartesian(ylim = zonal_stats_limits %>%
-                    filter(variable == 'sr_sd_delta') %>% # rlang::as_name(??$mapping$y)
-                    select(lwr, upr) %>%
-                    as_vector())
-relief_fig
-```
 
