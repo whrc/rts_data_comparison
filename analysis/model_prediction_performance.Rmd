@@ -49,6 +49,130 @@ drive_auth(email = 'hrodenhizer@woodwellclimate.org')
 
 ## Define Functions
 
+### assign_conf_stars
+
+```{r, include = FALSE}
+assign_conf_stars <- function(x) {
+  case_when(x > 0.1 ~ '',
+            x < 0.1 ~ '.',
+            x > 0.01 ~ '*',
+            x > 0.001 ~ '**',
+            x > 0.0001 ~ '***',
+            TRUE ~ '****')
+}
+  
+```
+
+### avg_precision
+
+```{r, include = FALSE}
+avg_precision <- function(recall, precision) {
+  
+  ap <- sum((recall[1:length(recall) - 1] - recall[2:length(recall)])*precision[1:length(precision) - 1], na.rm = TRUE)
+  return(ap)
+  
+}
+```
+
+### bbox
+
+```{r, include = FALSE}
+bbox <- function(prediction) {
+  bbox <- prediction[['prediction']] %>%
+    ext() %>%
+    st_bbox(crs = crs(prediction)) %>%
+    st_as_sfc() %>%
+    st_as_sf() %>%
+    mutate(id = get_rast_id(prediction)) %>%
+    rename(bbox_geometry = x)
+  
+  return(bbox)
+  
+}
+```
+
+### eval_expression
+
+```{r, include = FALSE}
+eval_expression <- function(expression, x) {
+  return(eval(expression))
+}
+```
+
+### get_rast_id
+
+```{r, include = FALSE}
+get_rast_id <- function(rast) {
+  id <- first(str_split(last(str_split(sources(rast), 
+                                                            '/')[[1]]), 
+                                             '\\.')[[1]])
+  return(id)
+}
+```
+
+### input_as_df
+
+```{r, include = FALSE}
+input_as_df <- function(rast) {
+  
+  # unify layer names
+  names(rast) <- c('r', 'g', 'b', 'ndvi', 'elev', 'sr', 'nir', 'ndwi', 'rts_class')
+  
+  # get polygon ID
+  current_id <- get_rast_id(rast)
+  
+  # add stretched rgb
+  rast_stretch <- stretch(subset(rast, 1:3),
+                          minv = 0,
+                          maxv = 1,
+                          minq = 0.01,
+                          maxq = 1)
+  names(rast_stretch) <- c('r_stretch', 'g_stretch', 'b_stretch')
+  
+  rast <- c(rast, rast_stretch)
+  
+  # convert to dataframe
+  df <- rast %>%
+    as.data.frame(xy = TRUE) %>%
+    mutate(id = current_id,
+           rts_class = factor(
+             case_when(is.na(rts_class) ~ 'bg',
+                       rts_class == 1 ~ 'rts'),
+             levels = c('rts', 'bg')
+           ),
+           r = r/max(r, na.rm = TRUE),
+           g = g/max(g, na.rm = TRUE),
+           b = b/max(b, na.rm = TRUE),
+           lum = 0.299*r + 0.587*g + 0.114*b, # lum equation from: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
+           nir = nir/max(nir, na.rm = TRUE)) %>%
+    filter(!(is.na(r_stretch) | is.na(g_stretch) | is.na(b_stretch))) %>%
+    mutate(
+      color_hex = factor(rgb(r_stretch, g_stretch, b_stretch, maxColorValue = 1))
+    )
+  return(df)
+  
+}
+```
+
+### json_from_googledrive
+
+```{r, include = FALSE}
+json_from_googledrive <- function(name, id, drive_resource, directory) {
+  current <- as_dribble(id)
+  make_my_dir(directory)
+  filepath = paste0(directory, name)
+  
+  if (!file.exists(filepath)) {
+    dl <- drive_download(
+      current,
+      path = filepath)
+  }
+  
+  json <- fromJSON(txt = filepath)
+  return(json)
+}
+```
+
 ### make_my_dir
 
 ```{r, include = FALSE}
@@ -58,6 +182,151 @@ make_my_dir <- function(output_dir) {
     dir.create(output_dir, recursive = TRUE)
   }
   
+}
+```
+
+### plot_prediction
+
+```{r}
+plot_prediction <- function(pid) {
+  
+  # get polygon data
+  current_data <- polys %>%
+    filter(id == pid)
+
+  # prep RGB data
+  current_rgb <- input_data %>%
+    filter(id == pid) %>%
+    full_join(current_data %>%
+                select(id, imagery, mean_iou),
+              by = c('imagery', 'id'))
+
+  print(
+    ggplot(data = current_data) +
+      geom_raster(data = current_rgb,
+                  aes(x = x, y = y, fill = color_hex),
+                  inherit.aes = FALSE) +
+      scale_fill_manual(breaks = levels(input_data$color_hex),
+                        values = levels(input_data$color_hex),
+                        guide = 'none') +
+      geom_sf(aes(geometry = bbox_geometry),
+              color = 'black',
+              fill = 'transparent') +
+      geom_sf(aes(geometry = val_geometry),
+              color = 'black',
+              fill = 'transparent',
+              linewidth = 0.5) +
+      geom_sf(aes(geometry = pred_geometry),
+              color = 'red',
+              fill = 'transparent',
+              linewidth = 0.5) +
+      facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('mIoU:', round(mean_iou, 2))) +
+      theme(axis.title = element_blank()) +
+      theme_bw()
+  )
+
+}
+```
+
+### plot_zonal_stats
+
+```{r, warning = FALSE}
+plot_zonal_stats <- function(var) {
+  
+  rts_fig <- ggplot(zonal_stats %>%
+                      filter(rts_class == 'RTS'), 
+                    aes(x = expected_performance_ci_size, 
+                        y = .data[[var]], 
+                        color = expected_performance_ci_size)) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme_bw() +
+    theme(axis.title.x = element_blank()) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == var & rts_class == 'RTS') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  delta_fig <- ggplot(zonal_stats %>%
+                        filter(rts_class == 'Delta'), 
+                      aes(x = expected_performance_ci_size, 
+                          y = .data[[var]], 
+                          color = expected_performance_ci_size)) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme_bw() +
+    theme(axis.title.x = element_blank()) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == var & rts_class == 'Delta') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  bg_fig <- ggplot(zonal_stats %>%
+                     filter(rts_class == 'Background'), 
+                   aes(x = expected_performance_ci_size, 
+                       y = .data[[var]], 
+                       color = expected_performance_ci_size)) +
+    geom_boxplot(outlier.shape = NA) +
+    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme_bw() +
+    theme(axis.title.x = element_blank()) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == var & rts_class == 'Background') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  zonal_stats_fig <- ggarrange(rts_fig +
+                theme(axis.text.x = element_blank(),
+                      axis.ticks.x = element_blank(),
+                      axis.title.y = element_blank()),
+              delta_fig +
+                theme(strip.background.x = element_blank(),
+                      strip.text.x = element_blank(),
+                      axis.text.x = element_blank(),
+                      axis.ticks.x = element_blank()),
+              bg_fig +
+                theme(strip.background.x = element_blank(),
+                      strip.text.x = element_blank(),
+                      axis.ticks.x = element_blank(),
+                      axis.title.y = element_blank()),
+              ncol = 1)
+  
+  zonal_stats_fig
+}
+```
+
+### pred_as_poly
+
+```{r, include = FALSE}
+pred_as_poly <- function(prediction) {
+  layer <- prediction[['prediction']]
+  layer[layer >= 0.5] <- 1
+  layer[layer < 0.5] <- 0
+  poly <- st_as_sf(as.polygons(layer, values = TRUE)) %>%
+    rename(tk_class = prediction) %>%
+    mutate(tk_class = case_when(tk_class == 0 ~ 'pred_bg',
+                                tk_class == 1 ~ 'pred'),
+           id = get_rast_id(prediction)) %>%
+    pivot_wider(names_from = 'tk_class',
+                values_from = 'geometry',
+                names_glue = '{tk_class}_geometry') %>%
+    st_set_geometry('pred_geometry')
+  if (!('pred_geometry' %in% colnames(poly))) {
+    poly <- poly %>%
+      mutate(pred_geometry = st_sfc(st_polygon(), crs = crs(prediction))) %>%
+    st_set_geometry('pred_geometry')
+  }
+  
+  return(poly)
 }
 ```
 
@@ -99,132 +368,6 @@ rast_from_googledrive <- function(name, id, drive_resource, directory) {
   
   raster <- rast(filepath)
   return(raster)
-}
-```
-
-### json_from_googledrive
-
-```{r, include = FALSE}
-json_from_googledrive <- function(name, id, drive_resource, directory) {
-  current <- as_dribble(id)
-  make_my_dir(directory)
-  filepath = paste0(directory, name)
-  
-  if (!file.exists(filepath)) {
-    dl <- drive_download(
-      current,
-      path = filepath)
-  }
-  
-  json <- fromJSON(txt = filepath)
-  return(json)
-}
-```
-
-### get_rast_id
-
-```{r, include = FALSE}
-get_rast_id <- function(rast) {
-  id <- first(str_split(last(str_split(sources(rast), 
-                                                            '/')[[1]]), 
-                                             '\\.')[[1]])
-  return(id)
-}
-```
-
-### bbox
-
-```{r, include = FALSE}
-bbox <- function(prediction) {
-  bbox <- prediction[['prediction']] %>%
-    ext() %>%
-    st_bbox(crs = crs(prediction)) %>%
-    st_as_sfc() %>%
-    st_as_sf() %>%
-    mutate(id = get_rast_id(prediction)) %>%
-    rename(bbox_geometry = x)
-  
-  return(bbox)
-  
-}
-```
-
-### pred_as_poly
-
-```{r, include = FALSE}
-pred_as_poly <- function(prediction) {
-  layer <- prediction[['prediction']]
-  layer[layer >= 0.5] <- 1
-  layer[layer < 0.5] <- 0
-  poly <- st_as_sf(as.polygons(layer, values = TRUE)) %>%
-    rename(tk_class = prediction) %>%
-    mutate(tk_class = case_when(tk_class == 0 ~ 'pred_bg',
-                                tk_class == 1 ~ 'pred'),
-           id = get_rast_id(prediction)) %>%
-    pivot_wider(names_from = 'tk_class',
-                values_from = 'geometry',
-                names_glue = '{tk_class}_geometry') %>%
-    st_set_geometry('pred_geometry')
-  if (!('pred_geometry' %in% colnames(poly))) {
-    poly <- poly %>%
-      mutate(pred_geometry = st_sfc(st_polygon(), crs = crs(prediction))) %>%
-    st_set_geometry('pred_geometry')
-  }
-  
-  return(poly)
-}
-```
-
-### val_as_poly
-
-```{r, include = FALSE}
-val_as_poly <- function(prediction) {
-  layer <- prediction[['validation']]
-  layer <- classify(layer, 
-                    matrix(c(0, 0,
-                             1, 1),
-                           ncol = 2,
-                           byrow = TRUE))
-  current_id <- get_rast_id(prediction)
-  poly <- st_as_sf(as.polygons(layer, values = TRUE)) %>%
-    rename(tk_class = validation) %>%
-    mutate(tk_class = case_when(tk_class == 0 ~ 'val_bg',
-                                tk_class == 1 ~ 'val'),
-           id = current_id) %>%
-    pivot_wider(names_from = 'tk_class',
-                values_from = 'geometry',
-                names_glue = '{tk_class}_geometry') %>%
-    st_set_geometry('val_geometry')
-  
-  return(poly)
-}
-```
-
-### input_as_df
-
-```{r, include = FALSE}
-input_as_df <- function(rast) {
-  
-  # unify layer names
-  names(rast) <- c('r', 'g', 'b', 'ndvi', 'elev', 'sr', 'nir', 'ndwi', 'rts_class')
-  
-  # get polygon ID
-  current_id <- get_rast_id(rast)
-  
-  # convert to dataframe
-  df <- rast %>%
-    as.data.frame(xy = TRUE) %>%
-    mutate(id = current_id,
-           rts_class = factor(case_when(is.na(rts_class) ~ 'bg',
-                                 rts_class == 1 ~ 'rts'),
-                              levels = c('rts', 'bg')),
-           r = r/max(r, na.rm = TRUE),
-           g = g/max(g, na.rm = TRUE),
-           b = b/max(b, na.rm = TRUE),
-           lum = 0.299*r + 0.587*g + 0.114*b, # lum equation from: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
-           nir = nir/max(nir, na.rm = TRUE))
-  return(df)
-  
 }
 ```
 
@@ -286,36 +429,6 @@ recall_precision <- function(truth, iou, thresholds) {
 }
 ```
 
-### avg_precision
-
-```{r, include = FALSE}
-avg_precision <- function(recall, precision) {
-  
-  ap <- sum((recall[1:length(recall) - 1] - recall[2:length(recall)])*precision[1:length(precision) - 1], na.rm = TRUE)
-  return(ap)
-  
-}
-```
-
-### get_rast_id
-
-```{r, include = FALSE}
-get_rast_id <- function(raster) {
-  id <- first(str_split(last(str_split(sources(raster), 
-                                       '/')[[1]]), 
-                        '\\.')[[1]])
-  return(id)
-}
-```
-
-### eval_expression
-
-```{r, include = FALSE}
-eval_expression <- function(expression, x) {
-  return(eval(expression))
-}
-```
-
 ### trim_outliers
 
 ```{r, include = FALSE}
@@ -327,19 +440,31 @@ trim_outliers <- function(x) {
 }
 ```
 
-### assign_conf_stars
+### val_as_poly
 
 ```{r, include = FALSE}
-assign_conf_stars <- function(x) {
-  case_when(x > 0.1 ~ '',
-            x < 0.1 ~ '.',
-            x > 0.01 ~ '*',
-            x > 0.001 ~ '**',
-            x > 0.0001 ~ '***',
-            TRUE ~ '****')
-}
+val_as_poly <- function(prediction) {
+  layer <- prediction[['validation']]
+  layer <- classify(layer, 
+                    matrix(c(0, 0,
+                             1, 1),
+                           ncol = 2,
+                           byrow = TRUE))
+  current_id <- get_rast_id(prediction)
+  poly <- st_as_sf(as.polygons(layer, values = TRUE)) %>%
+    rename(tk_class = validation) %>%
+    mutate(tk_class = case_when(tk_class == 0 ~ 'val_bg',
+                                tk_class == 1 ~ 'val'),
+           id = current_id) %>%
+    pivot_wider(names_from = 'tk_class',
+                values_from = 'geometry',
+                names_glue = '{tk_class}_geometry') %>%
+    st_set_geometry('val_geometry')
   
+  return(poly)
+}
 ```
+
 
 ## Prep Plot Variables
 
@@ -414,7 +539,7 @@ maxar_input <- c(maxar_input_1, maxar_input_2)
 ids <- map_chr(maxar_input, ~ get_rast_id(.x))
 names(maxar_input) <- ids
 
-rm(maxar_input_files, maxar_input_1, maxar_input_2)
+rm(maxar_input_files, maxar_input_1, maxar_input_2, ids)
 ```
 
 
@@ -472,7 +597,7 @@ planet_input <- c(planet_input_1, planet_input_2)
 ids <- map_chr(planet_input, ~ get_rast_id(.x))
 names(planet_input) <- ids
 
-rm(planet_input_files, planet_input_1, planet_input_2)
+rm(planet_input_files, planet_input_1, planet_input_2, ids)
 ```
 
 
@@ -530,7 +655,7 @@ sentinel_input <- c(sentinel_input_1, sentinel_input_2)
 ids <- map_chr(sentinel_input, ~ get_rast_id(.x))
 names(sentinel_input) <- ids
 
-rm(sentinel_input_files, sentinel_input_1, sentinel_input_2)
+rm(sentinel_input_files, sentinel_input_1, sentinel_input_2, ids)
 ```
 
 
@@ -635,6 +760,24 @@ rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 ```
 
 
+## Convert Input Data to DF
+
+```{r}
+input_data <- maxar_input %>%
+  map_dfr(~ input_as_df(.x)) %>%
+  mutate(imagery = 'Maxar') %>%
+  rbind.data.frame(planet_input %>%
+                     map_dfr(~ input_as_df(.x)) %>%
+                     mutate(imagery = 'Planet')) %>%
+  rbind.data.frame(sentinel_input %>%
+                     map_dfr(~ input_as_df(.x)) %>%
+                     mutate(imagery = 'Sentinel-2')) %>%
+  select(imagery, id, rts_class, x, y, 
+         r, g, b, lum, nir, ndvi, ndwi, elev, sr, 
+         r_stretch, g_stretch, b_stretch, color_hex)
+```
+
+
 ## Interactive Map of Features
 
 ```{r}
@@ -692,94 +835,11 @@ iou <- polys %>%
 iou
 ```
 
-```{r}
-input_ids <- tibble(maxar = map_chr(maxar_input, ~ get_rast_id(.x)),
-                    planet = map_chr(planet_input, ~ get_rast_id(.x)),
-                    sentinel = map_chr(sentinel_input, ~ get_rast_id(.x)))
+```{r fig.width = 7, fig.height = 2}
+pids <- unique(polys$id)
 
-if (all(input_ids$maxar == input_ids$planet) & all(input_ids$maxar == input_ids$sentinel)) {
-  input_ids <- input_ids %>%
-    select(id = maxar)
-}
-```
-
-```{r}
-for (i in 1:69) {
-  # get polygon data
-  current_data <- polys %>%
-    group_by(imagery) %>%
-    slice(i)
-  
-  # get polygon ID
-  current_id <- unique(current_data$id)
-  
-  # get index of polygon ID in the input data
-  idx <- which(input_ids$id == current_id)
-  
-  # prep RGB data
-  rgb_df <- stretch(subset(maxar_input[[idx]], 1:3),
-                     minv = 0,
-                     maxv = 1,
-                     minq = 0.01,
-                     maxq = 1)%>%
-    as.data.frame(stretch,
-                  xy = TRUE) %>%
-    rename(r = 3, g = 4, b = 5) %>%
-    filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
-    mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)),
-           imagery = 'Maxar') %>%
-    rbind.data.frame(stretch(subset(planet_input[[idx]], 1:3),
-                     minv = 0,
-                     maxv = 1,
-                     minq = 0.01,
-                     maxq = 1)%>%
-    as.data.frame(stretch,
-                  xy = TRUE) %>%
-    rename(r = 3, g = 4, b = 5) %>%
-    filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
-    mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)),
-           imagery = 'Planet')) %>%
-    rbind.data.frame(stretch(subset(sentinel_input[[idx]], 1:3),
-                     minv = 0,
-                     maxv = 1,
-                     minq = 0.01,
-                     maxq = 1)%>%
-    as.data.frame(stretch,
-                  xy = TRUE) %>%
-    rename(r = 3, g = 4, b = 5) %>%
-    filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
-    mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)),
-           imagery = 'Sentinel-2')) %>%
-    full_join(current_data %>%
-                select(imagery, mean_iou),
-              by = 'imagery')
-  
-  print(ggplot(data = current_data) +
-          geom_raster(data = rgb_df, 
-                      aes(x = x, y = y, fill = color.hex), 
-                      inherit.aes = FALSE) +
-          scale_fill_manual(values = levels(rgb_df$color.hex),
-                            guide = 'none') +
-          geom_sf(aes(geometry = bbox_geometry),
-                  color = 'black',
-                  fill = 'transparent') +
-          geom_sf(aes(geometry = val_geometry),
-                  color = 'black',
-                  fill = 'transparent',
-                  linewidth = 0.5) +
-          geom_sf(aes(geometry = pred_geometry),
-                  color = 'red',
-                  fill = 'transparent',
-                  linewidth = 0.5) +
-          facet_grid(.~ imagery + paste('mIoU:', round(mean_iou, 2))) +
-          ggtitle(paste('ID:', current_id)) +
-          theme(axis.title = element_blank()) +
-          theme_bw()
-          )
-  
-  rm(current_data, current_id, idx, rgb_df)
-  
-}
+walk(pids,
+    ~ plot_prediction(.x))
 ```
 
 
@@ -1451,22 +1511,6 @@ ggplot(polys,
   facet_grid(. ~ imagery)
 ```
 
-### Convert Input Data to DF
-
-```{r}
-input_data <- maxar_input %>%
-  map_dfr(~ input_as_df(.x)) %>%
-  mutate(imagery = 'Maxar') %>%
-  rbind.data.frame(planet_input %>%
-                     map_dfr(~ input_as_df(.x)) %>%
-                     mutate(imagery = 'Planet')) %>%
-  rbind.data.frame(sentinel_input %>%
-                     map_dfr(~ input_as_df(.x)) %>%
-                     mutate(imagery = 'Sentinel-2')) %>%
-  select(imagery, id, rts_class, x, y, r, g, b, lum, nir, ndvi, ndwi, elev, sr)
-```
-
-
 ### Zonal Statistics
 
 ```{r}
@@ -1518,24 +1562,38 @@ zonal_stats <- input_data %>%
 ```
 
 ```{r}
-my_model <- function(df) {
-  linear_reg() %>%
-  fit(r_mean ~ expected_performance_ci_size, 
-            data = df)
-model_output <- tidy(model)
-return(model_output)
+my_lm <- function(df) {
+  model <- linear_reg() %>%
+    fit(value ~ expected_performance_ci_size, 
+        data = df)
+  return(model)
 }
-# contrasts <- as_tibble(emmeans(model,
-#                                pairwise ~ expected_performance_ci_size,
-#                                adjust = 'tukey')$contrasts) %>%
-#   mutate(star_label = assign_conf_stars(p.value)) %>%
-#   select(contrast, estimate, se = SE, p_value = p.value, star_label)
+
+lm_summary <- function(model) {
+  model_output <- tidy(model) %>%
+    rename_with(~ str_replace_all(., '\\.', '_'))
+  return(model_output)
+}
+
+lm_contrasts <- function(model) {
+  contrasts <- as_tibble(emmeans(model$fit,
+                                 pairwise ~ expected_performance_ci_size,
+                                 adjust = 'tukey')$contrasts) %>%
+    mutate(star_label = assign_conf_stars(p.value)) %>%
+    select(contrast, estimate, se = SE, p_value = p.value, star_label)
+}
+
 ```
 
 ```{r}
-# model_output <- zonal_stats %>%
-#   group_by(rts_class, imagery) %>%
-#   nest()
+model_output <- zonal_stats %>%
+  select(imagery:sr_sd, expected_performance_ci_size) %>%
+  pivot_longer(r_mean:sr_sd, names_to = 'variable', values_to = 'value') %>%
+  group_by(rts_class, imagery, variable) %>%
+  nest() %>%
+  mutate(models = map(data, possibly(my_lm, otherwise = NA)),
+         summary = map(models, possibly(lm_summary, otherwise = NA)),
+         contrasts = map(models, possibly(lm_contrasts, otherwise = NA)))
 ```
 
 ### Plot
@@ -1562,80 +1620,11 @@ lum = [luminance](https://stackoverflow.com/questions/596216/formula-to-determin
 
 sr = shaded relief
 
-```{r, warning = FALSE}
-for (var in colnames(zonal_stats %>%
-                          ungroup() %>%
-                          select(r_mean:sr_sd))) {
-  
-  rts_fig <- ggplot(zonal_stats %>%
-                      filter(rts_class == 'RTS'), 
-                    aes(x = expected_performance_ci_size, 
-                        y = .data[[var]], 
-                        color = expected_performance_ci_size)) +
-    geom_boxplot(outlier.shape = NA) +
-    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                       guide = 'none') +
-    facet_grid(rts_class ~ imagery) +
-    theme_bw() +
-    theme(axis.title.x = element_blank()) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == var & rts_class == 'RTS') %>%
-                      ungroup() %>%
-                      select(lwr, upr) %>%
-                      as_vector())
-  
-  delta_fig <- ggplot(zonal_stats %>%
-                        filter(rts_class == 'Delta'), 
-                      aes(x = expected_performance_ci_size, 
-                          y = .data[[var]], 
-                          color = expected_performance_ci_size)) +
-    geom_boxplot(outlier.shape = NA) +
-    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                       guide = 'none') +
-    facet_grid(rts_class ~ imagery) +
-    theme_bw() +
-    theme(axis.title.x = element_blank()) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == var & rts_class == 'Delta') %>%
-                      ungroup() %>%
-                      select(lwr, upr) %>%
-                      as_vector())
-  
-  bg_fig <- ggplot(zonal_stats %>%
-                     filter(rts_class == 'Background'), 
-                   aes(x = expected_performance_ci_size, 
-                       y = .data[[var]], 
-                       color = expected_performance_ci_size)) +
-    geom_boxplot(outlier.shape = NA) +
-    scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
-                       guide = 'none') +
-    facet_grid(rts_class ~ imagery) +
-    theme_bw() +
-    theme(axis.title.x = element_blank()) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == var & rts_class == 'Background') %>%
-                      ungroup() %>%
-                      select(lwr, upr) %>%
-                      as_vector())
-  
-  ggarrange(rts_fig +
-                theme(axis.text.x = element_blank(),
-                      axis.ticks.x = element_blank(),
-                      axis.title.y = element_blank()),
-              delta_fig +
-                theme(strip.background.x = element_blank(),
-                      strip.text.x = element_blank(),
-                      axis.text.x = element_blank(),
-                      axis.ticks.x = element_blank()),
-              bg_fig +
-                theme(strip.background.x = element_blank(),
-                      strip.text.x = element_blank(),
-                      axis.ticks.x = element_blank(),
-                      axis.title.y = element_blank()),
-              ncol = 1)
-
-}
+```{r, fig.width = 7, fig.height = 6}
+zonal_stats_fig <- walk(colnames(zonal_stats %>%
+                                   ungroup() %>%
+                                   select(r_mean:sr_sd)),
+                        ~ plot_zonal_stats(.x))
 ```
-
 
 
