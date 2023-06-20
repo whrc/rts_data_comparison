@@ -110,6 +110,24 @@ get_rast_id <- function(rast) {
 }
 ```
 
+### googledrive_download
+
+```{r, include = FALSE}
+googledrive_download <- function(name, id, drive_resource, directory) {
+  current <- as_dribble(id)
+  make_my_dir(directory)
+  filepath = paste0(directory, '/', name)
+  
+  if (!file.exists(filepath)) {
+    print(filepath)
+    dl <- drive_download(
+      current,
+      path = filepath)
+  }
+
+}
+```
+
 ### input_as_df
 
 ```{r, include = FALSE}
@@ -154,22 +172,13 @@ input_as_df <- function(rast) {
 }
 ```
 
-### json_from_googledrive
+### import_pred
 
-```{r, include = FALSE}
-json_from_googledrive <- function(name, id, drive_resource, directory) {
-  current <- as_dribble(id)
-  make_my_dir(directory)
-  filepath = paste0(directory, name)
-  
-  if (!file.exists(filepath)) {
-    dl <- drive_download(
-      current,
-      path = filepath)
-  }
-  
-  json <- fromJSON(txt = filepath)
-  return(json)
+```{r}
+import_pred <- function(filepath) {
+  raster <- rast(filepath)
+  names(raster) <- c('prediction', 'validation')
+  return(raster)
 }
 ```
 
@@ -330,47 +339,6 @@ pred_as_poly <- function(prediction) {
 }
 ```
 
-### pred_from_googledrive
-
-```{r, include = FALSE}
-pred_from_googledrive <- function(name, id, drive_resource, directory) {
-  current <- as_dribble(id)
-  make_my_dir(directory)
-  filepath = paste0(directory, name)
-  
-  if (!file.exists(filepath)) {
-    print(filepath)
-    dl <- drive_download(
-      current,
-      path = filepath)
-  }
-  
-  raster <- rast(filepath)
-  names(raster) <- c('prediction', 'validation')
-  return(raster)
-}
-```
-
-### rast_from_googledrive
-
-```{r, include = FALSE}
-rast_from_googledrive <- function(name, id, drive_resource, directory) {
-  current <- as_dribble(id)
-  make_my_dir(directory)
-  filepath = paste0(directory, name)
-  
-  if (!file.exists(filepath)) {
-    print(filepath)
-    dl <- drive_download(
-      current,
-      path = filepath)
-  }
-  
-  raster <- rast(filepath)
-  return(raster)
-}
-```
-
 ### recall_precision
 
 ```{r, include = FALSE}
@@ -485,177 +453,293 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.s
   select(id = ID, region, status = Act_or_Gen, code_id, rts_area = Shape_Area, Long)
 ```
 
-### Maxar GeoTiffs
-
-20230601-161139-04062023
+### Download Files
 
 ```{r}
-# json metadata
-maxar_metadata <- drive_ls('https://drive.google.com/drive/folders/1TNRSVgLRhKbD-HVeC0HOslkFWzmhJija',
-                             pattern = 'json$')
-maxar_metadata <- maxar_metadata %>%
-  pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/maxar/predictions-20230601-161139-04062023/')
-    )
-maxar_metadata %>%
-  toJSON() %>%
-  minify()
+loc_dir <- './data'
+gd_dir <- 'data/DATA_V3_GEOTIFFS'
+maxar_pred_dir <- 'maxar20230601-161139_04062023'
+planet_pred_dir <- 'planet20230604-211027_p04062023'
+sentinel_pred_dir <- 'sentinel20230605-000543_p05062023'
+
+gd_pred_folders <- drive_ls(paste0(gd_dir, '/deprecated/predictions')) %>%
+  filter(name ==  maxar_pred_dir |
+           name == planet_pred_dir |
+           name == sentinel_pred_dir)
+
+gd_maxar_input_folders <- drive_ls(paste0(gd_dir, '/MAXAR')) %>%
+  filter(str_detect(name, 'valtest'))
+gd_planet_input_folders <- drive_ls(paste0(gd_dir, '/PLANET')) %>%
+  filter(str_detect(name, 'valtest'))
+gd_sentinel_input_folders<- drive_ls(paste0(gd_dir, '/SENTINEL2')) %>%
+  filter(str_detect(name, 'valtest'))
 ```
 
-```{r, include = FALSE}
-maxar_pred_files <- drive_ls('https://drive.google.com/drive/folders/1TNRSVgLRhKbD-HVeC0HOslkFWzmhJija',
-                             pattern = 'tif$') %>%
-  arrange(name)
+```{r}
+# check if prediction files have already been downloaded
+loc_filepaths <- list.files(loc_dir,
+                            full.names = TRUE,
+                            recursive = TRUE)
 
-maxar_preds <- maxar_pred_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) pred_from_googledrive(name, id, drive_resource, './data/maxar/predictions-20230601-161139-04062023/')
+# Maxar
+maxar_pred_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0(maxar_pred_dir))
+]
+maxar_input_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0('maxar/(', 
+                    gd_maxar_input_folders$name[1], '|', 
+                    gd_maxar_input_folders$name[2], ')'))
+]
+
+# Planet
+planet_pred_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0(planet_pred_dir))
+]
+planet_input_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0('planet/(', 
+                    gd_planet_input_folders$name[1], '|', 
+                    gd_planet_input_folders$name[2], ')'))
+]
+
+# Sentinel
+sentinel_pred_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0(sentinel_pred_dir))
+]
+sentinel_input_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0('sentinel/(', 
+                    gd_sentinel_input_folders$name[1], '|', 
+                    gd_sentinel_input_folders$name[2], ')'))
+]
+```
+
+```{r}
+if (length(maxar_pred_files) == length(planet_pred_files) & 
+    length(maxar_pred_files) == length(sentinel_pred_files) & 
+    length(maxar_pred_files) > 0) {
+  
+  print(paste('There are', length(maxar_pred_files), 'prediction tiles.'))
+  
+} else {
+  
+  # download Maxar predictions
+  maxar_pred_filepath <- paste0(loc_dir, '/maxar/predictions-', maxar_pred_dir, '/')
+  maxar_pred_files <- drive_ls(gd_pred_folders %>%
+                                 filter(str_detect(name, 'maxar')),
+                               pattern = 'tif$') %>%
+    arrange(name)
+  
+  maxar_pred_files %>%
+    pmap(
+      \(name, id, drive_resource, directory)
+      googledrive_download(name, id, drive_resource, maxar_pred_filepath)
     )
+  
+  maxar_pred_files <- list.files(maxar_pred_filepath,
+                                 pattern = 'tif$')
+  
+  # download Planet predictions
+  planet_pred_filepath <- paste0(loc_dir, '/planet/predictions-', planet_pred_dir)
+  planet_pred_files <- drive_ls(gd_pred_folders %>%
+                                  filter(str_detect(name, 'planet')),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  planet_pred_files %>%
+    pmap(
+      \(name, id, drive_resource, directory)
+      googledrive_download(name, id, drive_resource, planet_pred_filepath)
+    )
+  
+  planet_pred_files <- list.files(planet_pred_filepath,
+                                  pattern = 'tif$')
+  
+  # download Sentinel-2 predictions
+  sentinel_pred_filepath <- paste0(loc_dir, '/sentinel/predictions-', sentinel_pred_dir)
+  sentinel_pred_files <- drive_ls(gd_pred_folders %>%
+                                    filter(str_detect(name, 'sentinel')),
+                                  pattern = 'tif$') %>%
+    arrange(name)
+  
+  sentinel_pred_files %>%
+    pmap(
+      \(name, id, drive_resource, directory)
+      googledrive_download(name, id, drive_resource, sentinel_pred_filepath)
+    )
+  
+  sentinel_pred_files <- list.files(sentinel_pred_filepath,
+                                    pattern = 'tif$')
+  
+}
+```
+
+```{r}
+if (length(maxar_input_files) == length(planet_input_files) & 
+    length(maxar_input_files) == length(sentinel_input_files) &
+    length(maxar_input_files > 0)) {
+  
+  print(paste('There are', length(maxar_input_files), 'input data tiles.'))
+  
+} else {
+  
+  # Download Maxar Input Data Layers  
+  maxar_input_filepaths <- paste0(loc_dir, '/maxar/', gd_maxar_input_folders$name)
+  
+  maxar_input_files <- drive_ls(gd_maxar_input_folders %>%
+                                  slice(1),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  maxar_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, maxar_input_filepaths[1])
+    )
+  
+  maxar_input_files <- drive_ls(gd_maxar_input_folders %>%
+                                  slice(2),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  maxar_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, maxar_input_filepaths[2])
+    )
+  
+  maxar_input_files <- map(maxar_input_filepaths,
+                           ~ list.files(.x,
+                                        pattern = 'tif$',
+                                        full.names = TRUE))
+  maxar_input_files <- unlist(maxar_input_files)
+  
+  # Download Planet Input Data Layers  
+  planet_input_filepaths <- paste0(loc_dir, '/planet/', gd_planet_input_folders$name)
+  
+  planet_input_files <- drive_ls(gd_planet_input_folders %>%
+                                  slice(1),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  planet_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, planet_input_filepaths[1])
+    )
+  
+  planet_input_files <- drive_ls(gd_planet_input_folders %>%
+                                  slice(2),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  planet_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, planet_input_filepaths[2])
+    )
+  
+  planet_input_files <- map(planet_input_filepaths,
+                           ~ list.files(.x,
+                                        pattern = 'tif$',
+                                        full.names = TRUE))
+  planet_input_files <- unlist(planet_input_files)
+  
+  # Download sentinel Input Data Layers  
+  sentinel_input_filepaths <- paste0(loc_dir, '/sentinel/', gd_sentinel_input_folders$name)
+  
+  sentinel_input_files <- drive_ls(gd_sentinel_input_folders %>%
+                                  slice(1),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  sentinel_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, sentinel_input_filepaths[1])
+    )
+  
+  sentinel_input_files <- drive_ls(gd_sentinel_input_folders %>%
+                                  slice(2),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  sentinel_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, sentinel_input_filepaths[2])
+    )
+  
+  sentinel_input_files <- map(sentinel_input_filepaths,
+                           ~ list.files(.x,
+                                        pattern = 'tif$',
+                                        full.names = TRUE))
+  sentinel_input_files <- unlist(sentinel_input_files)
+  
+}
+```
+
+### Maxar GeoTiffs
+
+```{r, include = FALSE}
+maxar_preds <- map(maxar_pred_files, ~ import_pred(.x))
 
 rm(maxar_pred_files)
 ```
 
 ```{r, include = FALSE}
-maxar_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/10TRi-b8cL4wF2PwEx-3JlFHjb_bzPNZP',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-maxar_input_1 <- maxar_input_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/valtest_yg30_05_2023/')
-    )
-
-
-maxar_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/10d9DRLe_8VK2DOtPp-sVpKBQt2YL6HSV',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-maxar_input_2 <- maxar_input_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/maxar/valtest_nitze30_05_2023/')
-    )
-
-maxar_input <- c(maxar_input_1, maxar_input_2)
+maxar_input <- map(maxar_input_files, ~ rast(.x))
 ids <- map_chr(maxar_input, ~ get_rast_id(.x))
 names(maxar_input) <- ids
 
-rm(maxar_input_files, maxar_input_1, maxar_input_2, ids)
+rm(maxar_input_files)
 ```
 
 
 ### Planet GeoTiffs
 
-20230604-211027-p04062023
-
-```{r}
-# json metadata
-planet_metadata <- drive_ls('https://drive.google.com/drive/folders/1b1msmrdHmfSAFKb2fseg3CNb-JFJH6oj',
-                             pattern = 'json$')
-planet_metadata <- planet_metadata %>%
-  pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/planet/predictions-20230604-211027-p04062023/')
-    )
-planet_metadata %>%
-  toJSON() %>%
-  minify()
-```
-
 ```{r, include = FALSE}
-planet_pred_files <- drive_ls('https://drive.google.com/drive/folders/1b1msmrdHmfSAFKb2fseg3CNb-JFJH6oj',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-planet_preds <- planet_pred_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) pred_from_googledrive(name, id, drive_resource, './data/planet/predictions-20230604-211027-p04062023/')
-    )
+### remove this line when the newest version has been uploaded to google drive
+planet_pred_files <- list.files('./data/planet/predictions-planet20230604-211027_p04062023',
+                                full.names = TRUE)
+###
+planet_preds <- map(planet_pred_files, ~ import_pred(.x))
 
 rm(planet_pred_files)
 ```
 
 ```{r, include = FALSE}
-planet_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-4qJHIwv5yHid100syS_X1O118YqaDkR',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-planet_input_1 <- planet_input_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/valtest_yg_01_06_2023/')
-    )
-
-
-planet_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-5clNBqZ7vOJusY76civl9nEKrN4GXlp',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-planet_input_2 <- planet_input_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/planet/valtest_nitze_01_06_2023/')
-    )
-
-planet_input <- c(planet_input_1, planet_input_2)
+### remove this line when the newest version has been uploaded to google drive
+planet_input_files <- list.files('./data/planet',
+                                full.names = TRUE,
+                                recursive = TRUE)
+planet_input_files <- planet_input_files[str_detect(planet_input_files, 'valtest')]
+###
+planet_input <- map(planet_input_files, ~ rast(.x))
 ids <- map_chr(planet_input, ~ get_rast_id(.x))
 names(planet_input) <- ids
 
-rm(planet_input_files, planet_input_1, planet_input_2, ids)
+rm(planet_input_files)
 ```
-
 
 ### Sentinel GeoTiffs
 
-20220605-000543-p05062023
-
-```{r}
-# json metadata
-sentinel_metadata <- drive_ls('https://drive.google.com/drive/folders/1RfSjwUPFZ2wmLuRt8-AA3XOKgZH2LcLQ',
-                             pattern = 'json$')
-sentinel_metadata <- sentinel_metadata %>%
-  pmap(
-    \(name, id, drive_resource, directory) json_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-20220605-000543-p05062023/')
-    )
-sentinel_metadata %>%
-  toJSON() %>%
-  minify()
-```
-
 ```{r, include = FALSE}
-sentinel_pred_files <- drive_ls('https://drive.google.com/drive/folders/1RfSjwUPFZ2wmLuRt8-AA3XOKgZH2LcLQ',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-sentinel_preds <- sentinel_pred_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) pred_from_googledrive(name, id, drive_resource, './data/sentinel2/predictions-20220605-000543-p05062023/')
-    )
+sentinel_preds <- map(sentinel_pred_files, ~ import_pred(.x))
 
 rm(sentinel_pred_files)
 ```
 
 ```{r, include = FALSE}
-sentinel_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-HtUnP90-MfE1TBaqBQOteVzNs5unmGH',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-sentinel_input_1 <- sentinel_input_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel/valtest_yg_02_06_2023/')
-    )
-
-
-sentinel_input_files <- drive_ls('https://drive.google.com/drive/u/0/folders/1-KkzrqhSc8siv09tsj2TfpuhOtADYDD_',
-                             pattern = 'tif$') %>%
-  arrange(name)
-
-sentinel_input_2 <- sentinel_input_files %>%
-  pmap(
-    \(name, id, drive_resource, directory) rast_from_googledrive(name, id, drive_resource, './data/sentinel/valtest_nitze_02_06_2023/')
-    )
-
-sentinel_input <- c(sentinel_input_1, sentinel_input_2)
+sentinel_input <- map(sentinel_input_files, ~ rast(.x))
 ids <- map_chr(sentinel_input, ~ get_rast_id(.x))
 names(sentinel_input) <- ids
 
-rm(sentinel_input_files, sentinel_input_1, sentinel_input_2, ids)
+rm(sentinel_input_files)
 ```
 
 
