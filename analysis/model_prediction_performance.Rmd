@@ -38,6 +38,7 @@ library(nlstools)
 library(Ryacas)
 library(ggnewscale)
 library(egg)
+library(ggsignif)
 library(tidyverse)
 ```
 
@@ -53,12 +54,12 @@ drive_auth(email = 'hrodenhizer@woodwellclimate.org')
 
 ```{r, include = FALSE}
 assign_conf_stars <- function(x) {
-  case_when(x > 0.1 ~ '',
-            x < 0.1 ~ '.',
-            x > 0.01 ~ '*',
-            x > 0.001 ~ '**',
-            x > 0.0001 ~ '***',
-            TRUE ~ '****')
+  case_when(x <= 0.0001 ~ '****',
+            x <= 0.001 ~ '***',
+            x <= 0.01 ~ '**',
+            x <= 0.05 ~ '*',
+            x <= 0.1 ~ '.',
+            x > 0.1 ~ '')
 }
   
 ```
@@ -248,6 +249,13 @@ plot_zonal_stats <- function(var) {
                         y = .data[[var]], 
                         color = expected_performance_ci_size)) +
     geom_boxplot(outlier.shape = NA) +
+    geom_signif(data = zonal_stats_contrasts %>%
+                  filter(variable == var & rts_class == 'RTS'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE) +
     scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
@@ -265,6 +273,13 @@ plot_zonal_stats <- function(var) {
                           y = .data[[var]], 
                           color = expected_performance_ci_size)) +
     geom_boxplot(outlier.shape = NA) +
+    geom_signif(data = zonal_stats_contrasts %>%
+                  filter(variable == var & rts_class == 'Delta'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE) +
     scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
@@ -282,6 +297,13 @@ plot_zonal_stats <- function(var) {
                        y = .data[[var]], 
                        color = expected_performance_ci_size)) +
     geom_boxplot(outlier.shape = NA) +
+    geom_signif(data = zonal_stats_contrasts %>%
+                  filter(variable == var & rts_class == 'Background'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE) +
     scale_color_manual(values = c('#00CCFF', 'gray20', '#CC0000'),
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
@@ -294,20 +316,20 @@ plot_zonal_stats <- function(var) {
                       as_vector())
   
   zonal_stats_fig <- ggarrange(rts_fig +
-                theme(axis.text.x = element_blank(),
-                      axis.ticks.x = element_blank(),
-                      axis.title.y = element_blank()),
-              delta_fig +
-                theme(strip.background.x = element_blank(),
-                      strip.text.x = element_blank(),
-                      axis.text.x = element_blank(),
-                      axis.ticks.x = element_blank()),
-              bg_fig +
-                theme(strip.background.x = element_blank(),
-                      strip.text.x = element_blank(),
-                      axis.ticks.x = element_blank(),
-                      axis.title.y = element_blank()),
-              ncol = 1)
+                                 theme(axis.text.x = element_blank(),
+                                       axis.ticks.x = element_blank(),
+                                       axis.title.y = element_blank()),
+                               delta_fig +
+                                 theme(strip.background.x = element_blank(),
+                                       strip.text.x = element_blank(),
+                                       axis.text.x = element_blank(),
+                                       axis.ticks.x = element_blank()),
+                               bg_fig +
+                                 theme(strip.background.x = element_blank(),
+                                       strip.text.x = element_blank(),
+                                       axis.ticks.x = element_blank(),
+                                       axis.title.y = element_blank()),
+                               ncol = 1)
   
   zonal_stats_fig
 }
@@ -576,6 +598,8 @@ if (length(maxar_pred_files) == length(planet_pred_files) &
                                     pattern = 'tif$')
   
 }
+
+rm(gd_pred_folders)
 ```
 
 ```{r}
@@ -681,6 +705,8 @@ if (length(maxar_input_files) == length(planet_input_files) &
   sentinel_input_files <- unlist(sentinel_input_files)
   
 }
+
+rm(gd_maxar_input_folders, gd_planet_input_folders, gd_sentinel_input_folders)
 ```
 
 ### Maxar GeoTiffs
@@ -1532,8 +1558,7 @@ ggplot(polys,
 ggplot(polys, 
        aes(x = rts_area, 
            y = mean_iou, 
-           color = expected_performance_ci, 
-           shape = imagery)) +
+           color = expected_performance_ci,)) +
   geom_ribbon(data = iou_ci,
               aes(x = rts_area, ymin = predict_lwr, ymax = predict_upr),
               fill = 'gray50',
@@ -1571,8 +1596,7 @@ ggplot(polys,
 ggplot(polys, 
        aes(x = rts_area, 
            y = mean_iou, 
-           color = expected_performance_ci_size, 
-           shape = imagery)) +
+           color = expected_performance_ci_size)) +
   geom_ribbon(data = iou_ci,
               aes(x = rts_area, ymin = predict_lwr, ymax = predict_upr),
               fill = 'gray50',
@@ -1680,6 +1704,14 @@ model_output <- zonal_stats %>%
          contrasts = map(models, possibly(lm_contrasts, otherwise = NA)))
 ```
 
+```{r}
+zonal_stats_contrasts <- model_output %>%
+  select(imagery, rts_class, variable, contrasts) %>%
+  unnest(cols = c(contrasts)) %>%
+  filter(p_value <= 0.1) %>%
+  separate_wider_delim(contrast, delim = ' - ', names = c('x_min', 'x_max'), cols_remove = FALSE)
+```
+
 ### Plot
 
 ```{r}
@@ -1698,11 +1730,40 @@ group_by(imagery, expected_performance_ci_size, rts_class, variable) %>%
             upr = max(lim_upr))
 ```
 
+```{r}
+zonal_stats_contrasts <- zonal_stats_contrasts %>%
+  left_join(zonal_stats_limits, by = c('variable', 'rts_class')) %>%
+  group_by(imagery, rts_class, variable) %>%
+  mutate(n = n(),
+         y = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.15,
+                       TRUE ~ upr),
+         upr = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.25,
+                         TRUE ~ lwr + (upr - lwr)*1.1))
+
+# add new upr limits back to limits tibble
+zonal_stats_limits <- zonal_stats_limits %>%
+  left_join(zonal_stats_contrasts %>%
+              select(imagery, rts_class, variable, upr) %>%
+              group_by(rts_class, variable) %>%
+              summarise(new_upr = max(upr)),
+            by = c('rts_class', 'variable')) %>%
+  mutate(upr = case_when(!is.na(new_upr) ~ new_upr,
+                         TRUE ~ upr)) %>%
+  select(-new_upr)
+
+```
+
 These plots summarize the input data values (mean or standard deviation) in RTS cells, background cells, and the normalized difference between the two (Delta = `(RTS - Background)/Background`). Most of the input layer names should be self explanatory, but for the others:
 
 lum = [luminance](https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color) = `0.299*r + 0.587*g + 0.114*b` 
 
 sr = shaded relief
+
+A few takeaway points:
+
+-   NIR and NDVI (mean) figures indicate that RTS are predicted poorly where background cells have low NDVI/plant growth (plants reflect NIR, so have a higher NIR value). I.e. it's harder for the model to find the RTS where there's not much plant growth across the landscape. Also interesting on this point is that the standard deviation of red and green bands are higher in poorly predicted RTS (Maxar data only), perhaps indicating that patchier vegetation makes it harder for the model to find RTS.
+-   NDWI (mean) figure indicates that RTS features are predicted better where it's drier (fewer lakes?).
+-   Elevation (mean): I still need to think about this, because what this means probably depends on how exactly the elevation was normalized. The standard deviation of elevation figure indicates that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily. I.e. smooth landscape with uneven RTS is easy for the model to find.
 
 ```{r, fig.width = 7, fig.height = 6}
 zonal_stats_fig <- walk(colnames(zonal_stats %>%
