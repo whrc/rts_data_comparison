@@ -8,9 +8,9 @@ output:
 
 ## TODO:
 
--   Try using magnitude of difference between RTS and BG for zonal stats, rather than normalizing with BG
+-   Figure out why there appear to be non-zero IoU scores for predictions that didn't find any RTS.
 -   Possible to remove extra influence of multiple RTS within one tile?
--   Figure out why my IoU scores don't quite match Yili's - I've spent some time on this and am still uncertain.
+-   Figure out why my IoU scores don't quite match Yili's - Check removing non-existant predictions.
 -   Add legend for the validation and prediction polygons
 -   Shapley analysis (figure out how to import Python models from Google Drive)
 
@@ -23,6 +23,7 @@ knitr::opts_chunk$set(message = FALSE)
 ## Load Libraries
 
 ```{r, include = FALSE}
+library(reticulate)
 library(terra)
 library(sf)
 library(spData)
@@ -44,10 +45,8 @@ library(tidyverse)
 ```{python}
 import json
 from keras_unet_collection import models, utils
-import numpy as np
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.python.eager.monitoring import Metric
+import shap
+from matplotlib import pyplot as plt
 ```
 
 ## Prep Google Drive Authentication
@@ -55,6 +54,7 @@ from tensorflow.python.eager.monitoring import Metric
 ```{r, include = FALSE}
 drive_auth(email = 'hrodenhizer@woodwellclimate.org')
 ```
+
 
 ## Define Functions
 
@@ -265,18 +265,19 @@ plot_prediction <- function(pid) {
       geom_sf(aes(geometry = bbox_geometry),
               color = 'black',
               fill = 'transparent') +
-      geom_sf(aes(geometry = val_geometry),
-              color = 'Validation',
+      geom_sf(aes(geometry = val_geometry,
+              color = 'Validation'),
               fill = 'transparent',
               linewidth = 0.5) +
-      geom_sf(aes(geometry = pred_geometry),
-              color = 'Prediction',
+      geom_sf(aes(geometry = pred_geometry,
+              color = 'Prediction'),
               fill = 'transparent',
               linewidth = 0.5) +
       scale_color_manual(values = c('red', 'black')) +
       facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('mIoU:', round(mean_iou, 2))) +
       theme_bw() +
-      theme(axis.title = element_blank())
+      theme(axis.title = element_blank(),
+            legend.title = element_blank())
   )
 
 }
@@ -781,22 +782,12 @@ rm(maxar_input_files)
 ### Planet GeoTiffs
 
 ```{r, include = FALSE}
-### remove this line when the newest version has been uploaded to google drive
-planet_pred_files <- list.files('./data/planet/predictions-planet20230604-211027_p04062023',
-                                full.names = TRUE)
-###
 planet_preds <- map(planet_pred_files, ~ import_pred(.x))
 
 rm(planet_pred_files)
 ```
 
 ```{r, include = FALSE}
-### remove this line when the newest version has been uploaded to google drive
-planet_input_files <- list.files('./data/planet',
-                                full.names = TRUE,
-                                recursive = TRUE)
-planet_input_files <- planet_input_files[str_detect(planet_input_files, 'valtest')]
-###
 planet_input <- map(planet_input_files, ~ rast(.x))
 ids <- map_chr(planet_input, ~ get_rast_id(.x))
 names(planet_input) <- ids
@@ -985,7 +976,7 @@ polys <- polys %>%
 IoU (Calculated in Model)
 |Imagery|Test IoU|Val IoU|
 |:---:|:---:|:---:|
-|Maxar|0.75|0.69|
+|Maxar|0.73|0.72|
 |Planet|0.71|0.70|
 |Sentinel-2|0.68|0.66|
 
@@ -1838,24 +1829,24 @@ zonal_stats <- input_data %>%
             across(r:sr, sd, .names = "{.col}_sd")) %>%
   pivot_wider(names_from = 'rts_class', 
               values_from = c(r_mean:sr_sd)) %>%
-  mutate(r_mean_delta = (r_mean_rts - r_mean_bg)/r_mean_bg,
-         b_mean_delta = (b_mean_rts - b_mean_bg)/b_mean_bg,
-         g_mean_delta = (g_mean_rts - g_mean_bg)/g_mean_bg,
-         lum_mean_delta = (lum_mean_rts - lum_mean_bg)/lum_mean_bg,
-         nir_mean_delta = (nir_mean_rts - nir_mean_bg)/nir_mean_bg,
-         ndvi_mean_delta = (ndvi_mean_rts - ndvi_mean_bg)/ndvi_mean_bg,
-         ndwi_mean_delta = (ndwi_mean_rts - ndwi_mean_bg)/ndwi_mean_bg,
-         elev_mean_delta = (elev_mean_rts - elev_mean_bg)/elev_mean_bg,
-         sr_mean_delta = (sr_mean_rts - sr_mean_bg)/sr_mean_bg,
-         r_sd_delta = (r_sd_rts - r_sd_bg)/r_sd_bg,
-         b_sd_delta = (b_sd_rts - b_sd_bg)/b_sd_bg,
-         g_sd_delta = (g_sd_rts - g_sd_bg)/g_sd_bg,
-         lum_sd_delta = (lum_sd_rts - lum_sd_bg)/lum_sd_bg,
-         nir_sd_delta = (nir_sd_rts - nir_sd_bg)/nir_sd_bg,
-         ndvi_sd_delta = (ndvi_sd_rts - ndvi_sd_bg)/ndvi_sd_bg,
-         ndwi_sd_delta = (ndwi_sd_rts - ndwi_sd_bg)/ndwi_sd_bg,
-         elev_sd_delta = (elev_sd_rts - elev_sd_bg)/elev_sd_bg,
-         sr_sd_delta = (sr_sd_rts - sr_sd_bg)/sr_sd_bg) %>%
+  mutate(r_mean_delta = (r_mean_rts - r_mean_bg),
+         b_mean_delta = (b_mean_rts - b_mean_bg),
+         g_mean_delta = (g_mean_rts - g_mean_bg),
+         lum_mean_delta = (lum_mean_rts - lum_mean_bg),
+         nir_mean_delta = (nir_mean_rts - nir_mean_bg),
+         ndvi_mean_delta = (ndvi_mean_rts - ndvi_mean_bg),
+         ndwi_mean_delta = (ndwi_mean_rts - ndwi_mean_bg),
+         elev_mean_delta = (elev_mean_rts - elev_mean_bg),
+         sr_mean_delta = (sr_mean_rts - sr_mean_bg),
+         r_sd_delta = (r_sd_rts - r_sd_bg),
+         b_sd_delta = (b_sd_rts - b_sd_bg),
+         g_sd_delta = (g_sd_rts - g_sd_bg),
+         lum_sd_delta = (lum_sd_rts - lum_sd_bg),
+         nir_sd_delta = (nir_sd_rts - nir_sd_bg),
+         ndvi_sd_delta = (ndvi_sd_rts - ndvi_sd_bg),
+         ndwi_sd_delta = (ndwi_sd_rts - ndwi_sd_bg),
+         elev_sd_delta = (elev_sd_rts - elev_sd_bg),
+         sr_sd_delta = (sr_sd_rts - sr_sd_bg)) %>%
   pivot_longer(r_mean_rts:sr_sd_delta, 
                names_to = 'variable', 
                values_to = 'value') %>%
@@ -1944,7 +1935,7 @@ zonal_stats_limits <- zonal_stats_limits %>%
 
 ```
 
-These plots summarize the input data values (mean or standard deviation) in RTS cells, background cells, and the normalized difference between the two (Delta = `(RTS - Background)/Background`). Most of the input layer names should be self explanatory, but for the others:
+These plots summarize the input data values (mean or standard deviation) in RTS cells, background cells, and the normalized difference between the two (`Delta = RTS - Background`). Most of the input layer names should be self explanatory, but for the others:
 
 lum = [luminance](https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color) = `0.299*r + 0.587*g + 0.114*b` 
 
@@ -2004,30 +1995,88 @@ zonal_stats_figs[['sr_sd']]
 Read in Models from Google Drive
 
 ```{python}
-# # maxar model
-# with open('/content/drive/MyDrive/RTS_models/MODEL_V2_UNET3+_MAXAR/20220925-105508/params.json', 'r') as f:
-#   PARAMS = json.load(f)
-# 
-# maxar_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'], 
-#                   n_labels=2, 
-#                   filter_num_down=PARAMS['model']['filter_num'], 
-#                   filter_num_skip='auto', 
-#                   filter_num_aggregate='auto', 
-#                   stack_num_down=PARAMS['model']['stack_num_down'], 
-#                   stack_num_up=PARAMS['model']['stack_num_up'], 
-#                   activation=PARAMS['model']['activation'], 
-#                   output_activation=PARAMS['model']['out_activ'],
-#                   batch_norm=PARAMS['model']['batch_norm'], 
-#                   pool=PARAMS['model']['pooling'], 
-#                   unpool=PARAMS['model']['unpool'], 
-#                   deep_supervision=PARAMS['model']['deep_supervision'], 
-#                   backbone=PARAMS['model']['backbone'], 
-#                   weights=None, 
-#                   freeze_backbone=PARAMS['model']['freeze_backbone'], 
-#                   freeze_batch_norm=PARAMS['model']['freeze_bn'], 
-#                   name='unet3plus')
-# #import saved model weights
-# model_path = '/content/drive/MyDrive/RTS_models/MODEL_V2_UNET3+_MAXAR/20220925-105508/cp-0081-valiou0.727.ckpt'
-# maxar_model.load_weights(model_path)
+# maxar model
+with open('./data/maxar/20230621_022422/params.json', 'r') as f:
+  PARAMS = json.load(f)
+
+maxar_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
+                  n_labels=2,
+                  filter_num_down=PARAMS['model']['filter_num'],
+                  filter_num_skip='auto',
+                  filter_num_aggregate='auto',
+                  stack_num_down=PARAMS['model']['stack_num_down'],
+                  stack_num_up=PARAMS['model']['stack_num_up'],
+                  activation=PARAMS['model']['activation'],
+                  output_activation=PARAMS['model']['out_activ'],
+                  batch_norm=PARAMS['model']['batch_norm'],
+                  pool=PARAMS['model']['pooling'],
+                  unpool=PARAMS['model']['unpool'],
+                  deep_supervision=PARAMS['model']['deep_supervision'],
+                  backbone=PARAMS['model']['backbone'],
+                  weights=None,
+                  freeze_backbone=PARAMS['model']['freeze_backbone'],
+                  freeze_batch_norm=PARAMS['model']['freeze_bn'],
+                  name='unet3plus')
+#import saved model weights
+model_path = './data/maxar/20230621_022422/cp-0074-valiou0.695.ckpt'
+maxar_model.load_weights(model_path)
+
+# planet model
+with open('./data/planet/20230621_190115/params.json', 'r') as f:
+  PARAMS = json.load(f)
+
+planet_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
+                  n_labels=2,
+                  filter_num_down=PARAMS['model']['filter_num'],
+                  filter_num_skip='auto',
+                  filter_num_aggregate='auto',
+                  stack_num_down=PARAMS['model']['stack_num_down'],
+                  stack_num_up=PARAMS['model']['stack_num_up'],
+                  activation=PARAMS['model']['activation'],
+                  output_activation=PARAMS['model']['out_activ'],
+                  batch_norm=PARAMS['model']['batch_norm'],
+                  pool=PARAMS['model']['pooling'],
+                  unpool=PARAMS['model']['unpool'],
+                  deep_supervision=PARAMS['model']['deep_supervision'],
+                  backbone=PARAMS['model']['backbone'],
+                  weights=None,
+                  freeze_backbone=PARAMS['model']['freeze_backbone'],
+                  freeze_batch_norm=PARAMS['model']['freeze_bn'],
+                  name='unet3plus')
+#import saved model weights
+model_path = './data/planet/20230621_190115/cp-0085-valiou0.702.ckpt'
+planet_model.load_weights(model_path)
+
+# sentinel model
+with open('./data/sentinel/20230621_171002/params.json', 'r') as f:
+  PARAMS = json.load(f)
+
+planet_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
+                  n_labels=2,
+                  filter_num_down=PARAMS['model']['filter_num'],
+                  filter_num_skip='auto',
+                  filter_num_aggregate='auto',
+                  stack_num_down=PARAMS['model']['stack_num_down'],
+                  stack_num_up=PARAMS['model']['stack_num_up'],
+                  activation=PARAMS['model']['activation'],
+                  output_activation=PARAMS['model']['out_activ'],
+                  batch_norm=PARAMS['model']['batch_norm'],
+                  pool=PARAMS['model']['pooling'],
+                  unpool=PARAMS['model']['unpool'],
+                  deep_supervision=PARAMS['model']['deep_supervision'],
+                  backbone=PARAMS['model']['backbone'],
+                  weights=None,
+                  freeze_backbone=PARAMS['model']['freeze_backbone'],
+                  freeze_batch_norm=PARAMS['model']['freeze_bn'],
+                  name='unet3plus')
+#import saved model weights
+model_path = './data/sentinel/20230621_171002/cp-0081-valiou0.659.ckpt'
+planet_model.load_weights(model_path)
+```
+
+Access model input data from Python
+
+```{python}
+
 ```
 
