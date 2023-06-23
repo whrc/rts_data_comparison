@@ -8,7 +8,7 @@ output:
 
 ## TODO:
 
--   Update the prediction files!
+-   Try using magnitude of difference between RTS and BG for zonal stats, rather than normalizing with BG
 -   Possible to remove extra influence of multiple RTS within one tile?
 -   Figure out why my IoU scores don't quite match Yili's - I've spent some time on this and am still uncertain.
 -   Add legend for the validation and prediction polygons
@@ -266,16 +266,17 @@ plot_prediction <- function(pid) {
               color = 'black',
               fill = 'transparent') +
       geom_sf(aes(geometry = val_geometry),
-              color = 'black',
+              color = 'Validation',
               fill = 'transparent',
               linewidth = 0.5) +
       geom_sf(aes(geometry = pred_geometry),
-              color = 'red',
+              color = 'Prediction',
               fill = 'transparent',
               linewidth = 0.5) +
+      scale_color_manual(values = c('red', 'black')) +
       facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('mIoU:', round(mean_iou, 2))) +
-      theme(axis.title = element_blank()) +
-      theme_bw()
+      theme_bw() +
+      theme(axis.title = element_blank())
   )
 
 }
@@ -298,6 +299,7 @@ plot_zonal_stats <- function(var) {
                     annotation = star_label),
                 stat="identity",
                 manual = TRUE,
+                tip_length = 0.1,
                 inherit.aes = FALSE) +
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
@@ -527,11 +529,11 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.s
 ```{r}
 loc_dir <- './data'
 gd_dir <- 'data/DATA_V3_GEOTIFFS'
-maxar_pred_dir <- 'maxar20230601-161139_04062023'
-planet_pred_dir <- 'planet20230604-211027_p04062023'
-sentinel_pred_dir <- 'sentinel20230605-000543_p05062023'
+maxar_pred_dir <- 'MAXAR20230621_022422_p21062023'
+planet_pred_dir <- 'PLANET20230621_190115_p21062023'
+sentinel_pred_dir <- 'SENTINEL220230621_171002_p21062023'
 
-gd_pred_folders <- drive_ls(paste0(gd_dir, '/deprecated/predictions')) %>%
+gd_pred_folders <- drive_ls(paste0(gd_dir, '/TESTSET_INFERENCE')) %>%
   filter(name ==  maxar_pred_dir |
            name == planet_pred_dir |
            name == sentinel_pred_dir)
@@ -597,9 +599,9 @@ if (length(maxar_pred_files) == length(planet_pred_files) &
 } else {
   
   # download Maxar predictions
-  maxar_pred_filepath <- paste0(loc_dir, '/maxar/predictions-', maxar_pred_dir, '/')
+  maxar_pred_filepath <- paste0(loc_dir, '/maxar/predictions-', maxar_pred_dir)
   maxar_pred_files <- drive_ls(gd_pred_folders %>%
-                                 filter(str_detect(name, 'maxar')),
+                                 filter(str_detect(name, 'MAXAR')),
                                pattern = 'tif$') %>%
     arrange(name)
   
@@ -610,12 +612,13 @@ if (length(maxar_pred_files) == length(planet_pred_files) &
     )
   
   maxar_pred_files <- list.files(maxar_pred_filepath,
-                                 pattern = 'tif$')
+                                 pattern = 'tif$',
+                                 full.names = TRUE)
   
   # download Planet predictions
   planet_pred_filepath <- paste0(loc_dir, '/planet/predictions-', planet_pred_dir)
   planet_pred_files <- drive_ls(gd_pred_folders %>%
-                                  filter(str_detect(name, 'planet')),
+                                  filter(str_detect(name, 'PLANET')),
                                 pattern = 'tif$') %>%
     arrange(name)
   
@@ -626,12 +629,13 @@ if (length(maxar_pred_files) == length(planet_pred_files) &
     )
   
   planet_pred_files <- list.files(planet_pred_filepath,
-                                  pattern = 'tif$')
+                                  pattern = 'tif$',
+                                  full.names = TRUE)
   
   # download Sentinel-2 predictions
   sentinel_pred_filepath <- paste0(loc_dir, '/sentinel/predictions-', sentinel_pred_dir)
   sentinel_pred_files <- drive_ls(gd_pred_folders %>%
-                                    filter(str_detect(name, 'sentinel')),
+                                    filter(str_detect(name, 'SENTINEL2')),
                                   pattern = 'tif$') %>%
     arrange(name)
   
@@ -642,7 +646,8 @@ if (length(maxar_pred_files) == length(planet_pred_files) &
     )
   
   sentinel_pred_files <- list.files(sentinel_pred_filepath,
-                                    pattern = 'tif$')
+                                    pattern = 'tif$',
+                                    full.names = TRUE)
   
 }
 
@@ -977,6 +982,13 @@ polys <- polys %>%
 
 ### Calculate IoU
 
+IoU (Calculated in Model)
+|Imagery|Test IoU|Val IoU|
+|:---:|:---:|:---:|
+|Maxar|0.75|0.69|
+|Planet|0.71|0.70|
+|Sentinel-2|0.68|0.66|
+
 ```{r}
 polys <- polys %>%
   mutate(rts_iou = as.numeric(st_area(rts_int_geometry)/st_area(rts_uni_geometry)),
@@ -988,11 +1000,12 @@ polys <- polys %>%
 iou <- polys %>%
   as_tibble() %>%
   group_by(imagery) %>%
-  summarise(mean_iou = round(mean(mean_iou), 2))
-iou
+  summarise(mean_iou = round(mean(mean_iou), 2)) %>%
+  select(Imagery = imagery, `Val IoU` = mean_iou)
+knitr::kable(iou, caption = 'IoU (Calculated Directly from Predictions)')
 ```
 
-```{r fig.width = 7, fig.height = 2}
+```{r fig.width = 7, fig.height = 2.5}
 pids <- unique(polys$id)
 
 walk(pids,
@@ -1206,7 +1219,7 @@ rts_summaries <- polys %>%
             min_size = min(rts_area),
             max_size = max(rts_area),
             median_size = median(rts_area))
-rts_summaries
+knitr::kable(rts_summaries)
 ```
 
 ### Plot
@@ -1399,7 +1412,7 @@ rts_status_pvalues <- tibble(
 ) %>%
   mutate(p_label = paste0('p-value = ', round(p_val, 3)),
          star_label = assign_conf_stars(p_val))
-rts_status_pvalues
+knitr::kable(rts_status_pvalues)
 ```
 
 ### Plot
@@ -1805,7 +1818,7 @@ ggplot(rts_pq %>%
     ) +
   scale_color_manual(name = 'Prediction Quality',
                    values = pq_colors) +
-  scale_size(name = 'Count',
+  scale_size(name = 'Model Count',
              breaks = c(1, 2, 3),
              range = c(0.5, 2.5)) +
   theme_bw() +
@@ -1882,7 +1895,14 @@ zonal_stats_contrasts <- model_output %>%
   select(imagery, rts_class, variable, contrasts) %>%
   unnest(cols = c(contrasts)) %>%
   filter(p_value <= 0.1) %>%
-  separate_wider_delim(contrast, delim = ' - ', names = c('x_min', 'x_max'), cols_remove = FALSE)
+  separate_wider_delim(contrast, 
+                       delim = ' - ', 
+                       names = c('x_min', 'x_max'), 
+                       cols_remove = FALSE) %>%
+  mutate(x_min = as.numeric(factor(x_min,
+                                   levels = pq_labels)) + 0.05,
+         x_max = as.numeric(factor(x_max,
+                                   levels = pq_labels)) - 0.05)
 ```
 
 ```{r}
@@ -1941,13 +1961,11 @@ names(zonal_stats_figs) <- variables
 
 A few takeaway points:
 
--   NIR and NDVI (mean) figures indicate that RTS are predicted poorly where background cells have low NDVI/plant growth (plants reflect NIR, so have a higher NIR value). I.e. it's harder for the model to find the RTS where there's not much plant growth across the landscape. Also interesting on this point is that the standard deviation of red and green bands are higher in poorly predicted RTS (Maxar data only), perhaps indicating that patchier vegetation makes it harder for the model to find RTS.
+-   NIR and NDVI (mean) figures indicate that RTS are predicted poorly where background cells have low NDVI/plant growth (plants reflect NIR, so have a higher NIR value). I.e. it's harder for the model to find the RTS where there's not much plant growth across the landscape.
 
 ```{r, fig.width = 7, fig.height = 6}
 zonal_stats_figs[['nir_mean']]
 zonal_stats_figs[['ndvi_mean']]
-zonal_stats_figs[['r_sd']]
-zonal_stats_figs[['g_sd']]
 ```
 
 -   NDWI (mean) figure indicates that RTS features are predicted better where it's drier (fewer lakes?).
@@ -1956,10 +1974,9 @@ zonal_stats_figs[['g_sd']]
 zonal_stats_figs[['ndwi_mean']]
 ```
 
--   Elevation (mean): I still need to think about this, because what this means probably depends on how exactly the elevation was normalized. The standard deviation of elevation figure indicates that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily. I.e. smooth landscape with uneven RTS is easy for the model to find.
+-   The standard deviation of elevation figure indicates that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily. I.e. smooth landscape with uneven RTS is easy for the model to find.
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['elev_mean']]
 zonal_stats_figs[['elev_sd']]
 ```
 
@@ -1970,7 +1987,10 @@ zonal_stats_figs[['r_mean']]
 zonal_stats_figs[['g_mean']]
 zonal_stats_figs[['b_mean']]
 zonal_stats_figs[['lum_mean']]
+zonal_stats_figs[['elev_mean']]
 zonal_stats_figs[['sr_mean']]
+zonal_stats_figs[['r_sd']]
+zonal_stats_figs[['g_sd']]
 zonal_stats_figs[['b_sd']]
 zonal_stats_figs[['lum_sd']]
 zonal_stats_figs[['nir_sd']]
