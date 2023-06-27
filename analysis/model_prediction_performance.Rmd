@@ -531,7 +531,8 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.s
 ```{r}
 loc_dir <- './data'
 gd_dir <- 'data/DATA_V3_GEOTIFFS'
-maxar_pred_dir <- 'MAXAR20230621_022422_p21062023'
+maxar_pred_dir <- 'MAXAR20230623_161858_p25062023'
+# maxar_pred_dir <- 'MAXAR20230621_022422_p21062023'
 planet_pred_dir <- 'PLANET20230621_190115_p21062023'
 sentinel_pred_dir <- 'SENTINEL220230621_171002_p21062023'
 
@@ -766,7 +767,14 @@ rm(gd_maxar_input_folders, gd_planet_input_folders, gd_sentinel_input_folders)
 ### Maxar GeoTiffs
 
 ```{r, include = FALSE}
+maxar_pred_dir_old <- 'MAXAR20230621_022422_p21062023'
+maxar_pred_filepath_old <- paste0(loc_dir, '/maxar/predictions-', maxar_pred_dir_old)
+maxar_pred_files_old <- list.files(maxar_pred_filepath_old,
+                                 pattern = 'tif$',
+                                 full.names = TRUE)
+  
 maxar_preds <- map(maxar_pred_files, ~ import_pred(.x))
+maxar_preds_old <- map(maxar_pred_files_old, ~ import_pred(.x))
 
 rm(maxar_pred_files)
 ```
@@ -854,6 +862,10 @@ rm(tiles)
 
 ```{r}
 maxar_pred_polys <- maxar_preds %>%
+  map_dfr(~ pred_as_poly(.x)) %>%
+  mutate(imagery = 'Maxar')
+
+maxar_pred_polys_old <- maxar_preds_old %>%
   map_dfr(~ pred_as_poly(.x)) %>%
   mutate(imagery = 'Maxar')
 
@@ -962,13 +974,21 @@ leaflet() %>%
 
 ```{r}
 polys <- polys %>%
-  mutate(rts_int_geometry = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_intersection(...)),
+  mutate(rts_int_geometry = st_as_sfc(pmap(list(pred_geometry, 
+                                                val_geometry), 
+                                           ~ st_intersection(...)),
                                   crs = crs(polys)),
-         rts_uni_geometry = st_as_sfc(pmap(list(pred_geometry, val_geometry), ~ st_union(...)),
+         rts_uni_geometry = st_as_sfc(pmap(list(pred_geometry, 
+                                                val_geometry), 
+                                           ~ st_union(...)),
                                   crs = crs(polys)),
-         bg_int_geometry = st_as_sfc(pmap(list(pred_bg_geometry, val_bg_geometry), ~ st_intersection(...)),
+         bg_int_geometry = st_as_sfc(pmap(list(pred_bg_geometry, 
+                                               val_bg_geometry), 
+                                          ~ st_intersection(...)),
                                   crs = crs(polys)),
-         bg_uni_geometry = st_as_sfc(pmap(list(pred_bg_geometry, val_bg_geometry), ~ st_union(...)),
+         bg_uni_geometry = st_as_sfc(pmap(list(pred_bg_geometry, 
+                                               val_bg_geometry), 
+                                          ~ st_union(...)),
                                   crs = crs(polys)))
 ```
 
@@ -985,15 +1005,20 @@ IoU (Calculated in Model)
 polys <- polys %>%
   mutate(rts_iou = as.numeric(st_area(rts_int_geometry)/st_area(rts_uni_geometry)),
          bg_iou = as.numeric(st_area(bg_int_geometry)/st_area(bg_uni_geometry)),
-         mean_iou = (rts_iou + bg_iou)/2)
+         mean_iou = (rts_iou + bg_iou)/2,
+         mean_iou_v2 = case_when(
+           st_is_empty(pred_geometry) ~ bg_iou,
+           TRUE ~ (rts_iou + bg_iou)/2
+         ))
 ```
 
 ```{r}
 iou <- polys %>%
   as_tibble() %>%
   group_by(imagery) %>%
-  summarise(mean_iou = round(mean(mean_iou), 2)) %>%
-  select(Imagery = imagery, `Val IoU` = mean_iou)
+  summarise(mean_iou = round(mean(mean_iou), 2),
+            mean_iou_v2 = round(mean(mean_iou_v2), 2)) %>%
+  select(Imagery = imagery, `Val IoU` = mean_iou, `Val IoU Weighted` = mean_iou_weighted, `Val IoU 2` = mean_iou_v2)
 knitr::kable(iou, caption = 'IoU (Calculated Directly from Predictions)')
 ```
 
