@@ -8,11 +8,10 @@ output:
 
 ## TODO:
 
--   Figure out why there appear to be non-zero IoU scores for predictions that didn't find any RTS.
 -   Possible to remove extra influence of multiple RTS within one tile?
--   Figure out why my IoU scores don't quite match Yili's - Check removing non-existant predictions.
--   Add legend for the validation and prediction polygons
--   Shapley analysis (figure out how to import Python models from Google Drive)
+-   Figure out why my IoU scores don't quite match Yili's - Possible that this is being calculated on a different set of polygons? Still not sure if I need to remove classes that are missing from predictions. Try without background again?
+-   Test different thresholds for RTS
+-   Figure out some sort of explanation method to figure out which cells were most important to predictions? Does this even make sense in a context where we get probabilities out of the model rather than a label?
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -42,7 +41,7 @@ library(ggsignif)
 library(tidyverse)
 ```
 
-```{python}
+```{python, include = FALSE}
 import json
 from keras_unet_collection import models, utils
 import shap
@@ -270,15 +269,21 @@ plot_prediction <- function(pid) {
               color = 'Validation'),
               fill = 'transparent',
               linewidth = 0.5) +
+      scale_color_manual(name = '',
+                         values = c('gray90')) +
+      new_scale('color') +
       geom_sf(aes(geometry = pred_geometry,
-              color = 'Prediction'),
+              color = pq_ci_size),
               fill = 'transparent',
               linewidth = 0.5) +
-      scale_color_manual(values = c('red', 'black')) +
+      scale_color_manual(name = 'Prediction\n(Quality)',
+                         breaks = pq_labels,
+                         labels = pq_labels,
+                         values = pq_colors,
+                         drop = FALSE) +
       facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('mIoU:', round(mean_iou, 2))) +
       theme_bw() +
-      theme(axis.title = element_blank(),
-            legend.title = element_blank())
+      theme(axis.title = element_blank())
   )
 
 }
@@ -531,8 +536,8 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.s
 ```{r}
 loc_dir <- './data'
 gd_dir <- 'data/DATA_V3_GEOTIFFS'
-maxar_pred_dir <- 'MAXAR20230623_161858_p25062023'
-# maxar_pred_dir <- 'MAXAR20230621_022422_p21062023'
+# maxar_pred_dir <- 'MAXAR20230623_161858_p25062023'
+maxar_pred_dir <- 'MAXAR20230621_022422_p21062023'
 planet_pred_dir <- 'PLANET20230621_190115_p21062023'
 sentinel_pred_dir <- 'SENTINEL220230621_171002_p21062023'
 
@@ -995,11 +1000,14 @@ polys <- polys %>%
 ### Calculate IoU
 
 IoU (Calculated in Model)
-|Imagery|Test IoU|Val IoU|
+
+|Imagery (normalization method)|Test IoU|Val IoU|
 |:---:|:---:|:---:|
-|Maxar|0.73|0.72|
-|Planet|0.71|0.70|
-|Sentinel-2|0.68|0.66|
+|Maxar (0-1)|0.75|0.69|
+|Maxar (z-score)|0.73|0.72|
+|Planet (0-1)|0.71|0.70|
+|Sentinel-2 (0-1)|0.68|0.66|
+
 
 ```{r}
 polys <- polys %>%
@@ -1018,15 +1026,8 @@ iou <- polys %>%
   group_by(imagery) %>%
   summarise(mean_iou = round(mean(mean_iou), 2),
             mean_iou_v2 = round(mean(mean_iou_v2), 2)) %>%
-  select(Imagery = imagery, `Val IoU` = mean_iou, `Val IoU Weighted` = mean_iou_weighted, `Val IoU 2` = mean_iou_v2)
+  select(Imagery = imagery, `Val IoU` = mean_iou, `Val IoU (remove zeros)` = mean_iou_v2)
 knitr::kable(iou, caption = 'IoU (Calculated Directly from Predictions)')
-```
-
-```{r fig.width = 7, fig.height = 2.5}
-pids <- unique(polys$id)
-
-walk(pids,
-    ~ plot_prediction(.x))
 ```
 
 
@@ -1525,22 +1526,22 @@ sentinel_d1 <- D(expression(y = 0.6839025 * x / (250.2487224 + x)), name = 'x')
 estimate_grid <- tibble(rts_area = seq(12000, 15000, by = 0.1))
 
 maxar_est <- estimate_grid %>%
-  mutate(iou_est = eval_expression(maxar_d1, rts_area))
+  mutate(slope_est = eval_expression(maxar_d1, rts_area))
 planet_est <- estimate_grid %>%
-  mutate(iou_est = eval_expression(planet_d1, rts_area))
+  mutate(slope_est = eval_expression(planet_d1, rts_area))
 sentinel_est <- estimate_grid %>%
-  mutate(iou_est = eval_expression(sentinel_d1, rts_area))
+  mutate(slope_est = eval_expression(sentinel_d1, rts_area))
 
 maxar_cross <- maxar_est %>%
-  slice(which.min(abs(1e-06-iou_est))) %>%
+  slice(which.min(abs(1e-06-slope_est))) %>%
   select(rts_area) %>%
   as.numeric() # find closest to 1e-06
 planet_cross <- planet_est %>%
-  slice(which.min(abs(1e-06-iou_est))) %>%
+  slice(which.min(abs(1e-06-slope_est))) %>%
   select(rts_area) %>%
   as.numeric() # find closest to 1e-06
 sentinel_cross <- sentinel_est %>%
-  slice(which.min(abs(1e-06-iou_est))) %>%
+  slice(which.min(abs(1e-06-slope_est))) %>%
   select(rts_area) %>%
   as.numeric() # find closest to 1e-06
 
@@ -1731,6 +1732,23 @@ ggplot(polys,
   facet_grid(. ~ imagery)
 ```
 
+```{r}
+knitr::kable(size_thresholds)
+knitr::kable(polys %>%
+               as_tibble() %>%
+               count(imagery, pq_ci_size) %>%
+               pivot_wider(names_from = pq_ci_size, values_from = n))
+```
+
+Visualize the RTS predictions
+
+```{r fig.width = 7, fig.height = 2.5}
+pids <- unique(polys$id)
+
+walk(pids,
+    ~ plot_prediction(.x))
+```
+
 Is performance class the same across imagery sources for most RTS features?
 
 ```{r}
@@ -1809,18 +1827,6 @@ ggplot(polys,
         legend.title = element_blank(),
         panel.grid.minor = element_blank()) +
   coord_fixed(ratio = 1/10)
-```
-
-```{r, warning = FALSE}
-ggplot(rts_pq, 
-       aes(x = n, color = pq_ci_size)) +
-  geom_freqpoly(bins = 4) +
-  scale_x_continuous(name = '# Imagery Sources',
-                     limits = c(0, 3)) +
-  scale_y_continuous(name = 'RTS Feature Count') +
-  scale_color_manual(name = 'Prediction Quality',
-                     values = pq_colors) +
-  theme_bw()
 ```
 
 ```{r, fig.width = 4, fig.height = 6}
@@ -2016,11 +2022,10 @@ zonal_stats_figs[['ndwi_sd']]
 zonal_stats_figs[['sr_sd']]
 ```
 
-### Shapley Additive Explanation Analysis
 
-Read in Models from Google Drive
+## Read in Models from Google Drive
 
-```{python}
+```{python, include = FALSE}
 # maxar model
 with open('./data/maxar/20230621_022422/params.json', 'r') as f:
   PARAMS = json.load(f)
@@ -2045,7 +2050,7 @@ maxar_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
                   name='unet3plus')
 #import saved model weights
 model_path = './data/maxar/20230621_022422/cp-0074-valiou0.695.ckpt'
-maxar_model.load_weights(model_path)
+maxar_model.load_weights(model_path).expect_partial()
 
 # planet model
 with open('./data/planet/20230621_190115/params.json', 'r') as f:
@@ -2071,7 +2076,7 @@ planet_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
                   name='unet3plus')
 #import saved model weights
 model_path = './data/planet/20230621_190115/cp-0085-valiou0.702.ckpt'
-planet_model.load_weights(model_path)
+planet_model.load_weights(model_path).expect_partial()
 
 # sentinel model
 with open('./data/sentinel/20230621_171002/params.json', 'r') as f:
@@ -2097,73 +2102,5 @@ planet_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
                   name='unet3plus')
 #import saved model weights
 model_path = './data/sentinel/20230621_171002/cp-0081-valiou0.659.ckpt'
-planet_model.load_weights(model_path)
+planet_model.load_weights(model_path).expect_partial()
 ```
-
-Access model input data from Python
-
-```{r}
-maxar_input_array <- map(maxar_input, ~ as.array(.x)[,,c(1:3, 5:9)])
-```
-
-```{r}
-test <- as.array(maxar_input_array)
-```
-
-```{python}
-test = r.test["00000000000000000050"]
-print(test.shape)
-```
-
-```{python}
-from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
-import json
-import shap
-import tensorflow as tf
-
-# load pre-trained model and choose two images to explain
-model = ResNet50(weights='imagenet')
-def f(X):
-    tmp = X.copy()
-    preprocess_input(tmp)
-    return model(tmp)
-X, y = shap.datasets.imagenet50()
-
-# load the ImageNet class names as a vectorized mapping function from ids to names
-url = "https://s3.amazonaws.com/deep-learning-models/image-models/imagenet_class_index.json"
-with open(shap.datasets.cache(url)) as file:
-    class_names = [v[1] for v in json.load(file).values()]
-```
-
-```{python}
-# define a masker that is used to mask out partitions of the input image, this one uses a blurred background
-masker = shap.maskers.Image("inpaint_telea", X[0].shape)
-
-# By default the Partition explainer is used for all  partition explainer
-explainer = shap.Explainer(f, masker, output_names=class_names)
-
-# here we use 500 evaluations of the underlying model to estimate the SHAP values
-shap_values = explainer(X[1:3], max_evals=500, batch_size=50, outputs=shap.Explanation.argsort.flip[:1])
-shap.image_plot(shap_values)
-```
-
-```{python}
-maxar_model.input_shape
-```
-
-```{python}
-# define a masker that is used to mask out partitions of the input image, this one uses a blurred background
-masker_test = shap.maskers.Image("inpaint_telea", test.shape)
-
-# By default the Partition explainer is used for all  partition explainer
-explainer_test = shap.Explainer(maxar_model, masker_test)
-
-# here we use 500 evaluations of the underlying model to estimate the SHAP values
-shap_values_test = explainer(test, max_evals=500, batch_size=50, outputs=shap.Explanation.argsort.flip[:1])
-shap.image_plot(shap_values_test)
-```
-
-```{r}
-
-```
-
