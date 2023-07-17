@@ -9,7 +9,7 @@ output:
 ## TODO:
 
 -   Possible to remove extra influence of multiple RTS within one tile?
--   Figure out why my IoU scores don't quite match Yili's - Possible that this is being calculated on a different set of polygons? Still not sure if I need to remove classes that are missing from predictions. Try without background again?
+-   Figure out why my IoU scores don't quite match Yili's - Possible that this is being calculated on a different set of polygons? Still not sure if I need to remove classes that are missing from predictions.
 -   Test different thresholds for RTS
 -   Figure out some sort of explanation method to figure out which cells were most important to predictions? Does this even make sense in a context where we get probabilities out of the model rather than a label?
 
@@ -387,13 +387,62 @@ plot_zonal_stats <- function(var) {
 }
 ```
 
+### calc_rts_threshold
+
+```{r}
+calc_rts_threshold <- function(prediction, thresholds) {
+  
+  mean_iou <- c()
+  
+  for (threshold in thresholds) {
+    
+    # classify the prediction
+    prediction[['pred_class']] <- classify(
+      prediction[['prediction']],
+      matrix(c(0, threshold, 0,
+               threshold, 1, 1),
+             byrow = TRUE,
+             ncol = 3),
+      right = FALSE
+    )
+    
+    # calculate ground truth classes
+    prediction[['zones']] <- prediction[['pred_class']] + prediction[['validation']]
+    prediction[['area']] <- cellSize(prediction[['zones']])
+    
+    # calculate zonal stats
+    areas <- zonal(prediction[['area']],
+                   prediction[['zones']],
+                   fun = 'sum')
+    
+    # calculate mean IoU
+    rts_iou <- ifelse(is.na(areas$area[3]),
+                      0,
+                      areas$area[3]/(areas$area[3] + areas$area[2]))
+    bg_iou <- areas$area[1]/(areas$area[1] + areas$area[2])
+    mean_iou <- c(mean_iou, mean(c(rts_iou, bg_iou)))
+    
+    
+  }
+  
+  output <- tibble(
+    id = get_rast_id(prediction),
+    threshold = thresholds,
+    mean_iou = mean_iou
+  )
+  
+  return(output)
+  
+}
+```
+
 ### pred_as_poly
 
 ```{r, include = FALSE}
-pred_as_poly <- function(prediction) {
+pred_as_poly <- function(prediction, threshold) {
   layer <- prediction[['prediction']]
-  layer[layer >= 0.5] <- 1
-  layer[layer < 0.5] <- 0
+  layer[layer >= threshold] <- 1
+  layer[layer < threshold] <- 0
   poly <- st_as_sf(as.polygons(layer, values = TRUE)) %>%
     rename(tk_class = prediction) %>%
     mutate(tk_class = case_when(tk_class == 0 ~ 'pred_bg',
@@ -464,7 +513,8 @@ recall_precision <- function(truth, iou, thresholds) {
   precision <- c(precision, 1)
   
   output <- tibble(recall = recall,
-                   precision = precision)
+                   precision = precision,
+                   threshold = threshold)
   
   return(output)
   
@@ -506,7 +556,6 @@ val_as_poly <- function(prediction) {
   return(poly)
 }
 ```
-
 
 ## Prep Plot Variables
 
@@ -865,21 +914,64 @@ rm(tiles)
 
 ## Convert Predictions to Vector
 
+### Calculate Best RTS Threshold
+
+```{r}
+maxar_rts_threshold <- maxar_preds %>% 
+  map_dfr(~ calc_rts_threshold(.x, seq(0.3, 0.7, by = 0.01))) %>%
+  group_by(threshold) %>%
+  summarise(mean_iou = mean(mean_iou)) %>%
+  ungroup() %>%
+  filter(mean_iou == max(mean_iou)) %>%
+  select(threshold) %>%
+  as.numeric()
+
+maxar_rts_threshold_old <- maxar_preds_old %>% 
+  map_dfr(~ calc_rts_threshold(.x, seq(0.3, 0.7, by = 0.01))) %>%
+  group_by(threshold) %>%
+  summarise(mean_iou = mean(mean_iou)) %>%
+  ungroup() %>%
+  filter(mean_iou == max(mean_iou)) %>%
+  select(threshold) %>%
+  as.numeric()
+
+planet_rts_threshold <- planet_preds %>% 
+  map_dfr(~ calc_rts_threshold(.x, seq(0.3, 0.7, by = 0.01))) %>%
+  group_by(threshold) %>%
+  summarise(mean_iou = mean(mean_iou)) %>%
+  ungroup() %>%
+  filter(mean_iou == max(mean_iou)) %>%
+  select(threshold) %>%
+  as.numeric()
+
+sentinel_rts_threshold <- sentinel_preds %>% 
+  map_dfr(~ calc_rts_threshold(.x, seq(0.3, 0.7, by = 0.01))) %>%
+  group_by(threshold) %>%
+  summarise(mean_iou = mean(mean_iou)) %>%
+  ungroup() %>%
+  filter(mean_iou == max(mean_iou)) %>%
+  select(threshold) %>%
+  as.numeric()
+```
+Maxar RTS Threshold: `r maxar_rts_threshold`
+Planet RTS Threshold: `r planet_rts_threshold`
+Sentinel RTS Threshold: `r sentinel_rts_threshold`
+
 ```{r}
 maxar_pred_polys <- maxar_preds %>%
-  map_dfr(~ pred_as_poly(.x)) %>%
+  map_dfr(~ pred_as_poly(.x, maxar_rts_threshold)) %>%
   mutate(imagery = 'Maxar')
 
 maxar_pred_polys_old <- maxar_preds_old %>%
-  map_dfr(~ pred_as_poly(.x)) %>%
+  map_dfr(~ pred_as_poly(.x, maxar_rts_threshold_old)) %>%
   mutate(imagery = 'Maxar')
 
 planet_pred_polys <- planet_preds %>%
-  map_dfr(~ pred_as_poly(.x)) %>%
+  map_dfr(~ pred_as_poly(.x, planet_rts_threshold)) %>%
   mutate(imagery = 'Planet')
 
 sentinel_pred_polys <- sentinel_preds %>%
-  map_dfr(~ pred_as_poly(.x)) %>%
+  map_dfr(~ pred_as_poly(.x, sentinel_rts_threshold)) %>%
   mutate(imagery = 'Sentinel-2')
 ```
 
@@ -1042,16 +1134,16 @@ polys <- polys %>%
 thresholds <- seq(0.2, 0.8, by = 0.1)
 
 maxar_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Maxar')$ground_truth, 
-                           filter(polys, imagery == 'Maxar')$rts_iou, 
-                           thresholds)
+                                      filter(polys, imagery == 'Maxar')$rts_iou, 
+                                      thresholds)
 
 planet_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Planet')$ground_truth, 
-                           filter(polys, imagery == 'Planet')$rts_iou, 
-                           thresholds)
+                                       filter(polys, imagery == 'Planet')$rts_iou, 
+                                       thresholds)
 
 sentinel_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$ground_truth, 
-                           filter(polys, imagery == 'Sentinel-2')$rts_iou, 
-                           thresholds)
+                                         filter(polys, imagery == 'Sentinel-2')$rts_iou, 
+                                         thresholds)
 
 rts_rec_pre <- maxar_rts_rec_pre %>%
   mutate(imagery = 'Maxar') %>%
