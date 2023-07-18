@@ -10,8 +10,9 @@ output:
 
 -   Possible to remove extra influence of multiple RTS within one tile?
 -   Figure out why my IoU scores don't quite match Yili's - Possible that this is being calculated on a different set of polygons? Still not sure if I need to remove classes that are missing from predictions.
--   Test different thresholds for RTS
+-   Decide whether to use best RTS threshold or 0.5
 -   Figure out some sort of explanation method to figure out which cells were most important to predictions? Does this even make sense in a context where we get probabilities out of the model rather than a label?
+-   Run some sort of analysis of probabilities and input data layer values?
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -100,6 +101,55 @@ bbox <- function(prediction) {
 }
 ```
 
+### calc_rts_threshold
+
+```{r}
+calc_rts_threshold <- function(prediction, thresholds) {
+  
+  mean_iou <- c()
+  
+  for (threshold in thresholds) {
+    
+    # classify the prediction
+    prediction[['pred_class']] <- classify(
+      prediction[['prediction']],
+      matrix(c(0, threshold, 0,
+               threshold, 1, 1),
+             byrow = TRUE,
+             ncol = 3),
+      right = FALSE
+    )
+    
+    # calculate ground truth classes
+    prediction[['zones']] <- prediction[['pred_class']] + prediction[['validation']]
+    prediction[['area']] <- cellSize(prediction[['zones']])
+    
+    # calculate zonal stats
+    areas <- zonal(prediction[['area']],
+                   prediction[['zones']],
+                   fun = 'sum')
+    
+    # calculate mean IoU
+    rts_iou <- ifelse(is.na(areas$area[3]),
+                      0,
+                      areas$area[3]/(areas$area[3] + areas$area[2]))
+    bg_iou <- areas$area[1]/(areas$area[1] + areas$area[2])
+    mean_iou <- c(mean_iou, mean(c(rts_iou, bg_iou)))
+    
+    
+  }
+  
+  output <- tibble(
+    id = get_rast_id(prediction),
+    threshold = thresholds,
+    mean_iou = mean_iou
+  )
+  
+  return(output)
+  
+}
+```
+
 ### eval_expression
 
 ```{r, include = FALSE}
@@ -108,13 +158,43 @@ eval_expression <- function(expression, x) {
 }
 ```
 
+### filter_input_data
+
+```{r}
+filter_input_data <- function(input_list, ids) {
+  input_filtered <- list()
+  input_ids <- c()
+  idx <- 0
+  for (input in input_list) {
+    input_id <- get_rast_id(input)
+    if (input_id %in% ids) {
+      idx <- idx + 1
+      input_ids <- c(input_ids, input_id)
+      input_filtered[[idx]] <- input
+    }
+    
+  }
+  
+  input_ordered <- list()
+  idx <- 0
+  for (id in ids) {
+    
+    idx <- idx + 1
+    input_ordered[[idx]] <- input_filtered[[which(input_ids == id)]]
+  }
+  
+  return(input_ordered)
+  
+}
+```
+
 ### get_rast_id
 
 ```{r, include = FALSE}
 get_rast_id <- function(rast) {
   id <- first(str_split(last(str_split(sources(rast), 
-                                                            '/')[[1]]), 
-                                             '\\.')[[1]])
+                                       '/')[[1]]), 
+                        '\\.')[[1]])
   return(id)
 }
 ```
@@ -140,26 +220,28 @@ googledrive_download <- function(name, id, drive_resource, directory) {
 ### input_as_df
 
 ```{r, include = FALSE}
-input_as_df <- function(rast) {
+input_as_df <- function(input, pred) {
+  
+  input[['prediction']] <- pred[['prediction']]
   
   # unify layer names
-  names(rast) <- c('r', 'g', 'b', 'ndvi', 'elev', 'sr', 'nir', 'ndwi', 'rts_class')
+  names(input) <- c('r', 'g', 'b', 'ndvi', 'elev', 'sr', 'nir', 'ndwi', 'rts_class', 'prediction')
   
   # get polygon ID
-  current_id <- get_rast_id(rast)
+  current_id <- get_rast_id(input)
   
   # add stretched rgb
-  rast_stretch <- stretch(subset(rast, 1:3),
+  input_stretch <- stretch(subset(input, 1:3),
                           minv = 0,
                           maxv = 1,
                           minq = 0.01,
                           maxq = 1)
-  names(rast_stretch) <- c('r_stretch', 'g_stretch', 'b_stretch')
+  names(input_stretch) <- c('r_stretch', 'g_stretch', 'b_stretch')
   
-  rast <- c(rast, rast_stretch)
+  input <- c(input, input_stretch)
   
   # convert to dataframe
-  df <- rast %>%
+  df <- input %>%
     as.data.frame(xy = TRUE) %>%
     mutate(id = current_id,
            rts_class = factor(
@@ -283,7 +365,8 @@ plot_prediction <- function(pid) {
                          drop = FALSE) +
       facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('mIoU:', round(mean_iou, 2))) +
       theme_bw() +
-      theme(axis.title = element_blank())
+      theme(axis.title = element_blank(),
+            axis.text = element_blank)
   )
 
 }
@@ -387,59 +470,10 @@ plot_zonal_stats <- function(var) {
 }
 ```
 
-### calc_rts_threshold
-
-```{r}
-calc_rts_threshold <- function(prediction, thresholds) {
-  
-  mean_iou <- c()
-  
-  for (threshold in thresholds) {
-    
-    # classify the prediction
-    prediction[['pred_class']] <- classify(
-      prediction[['prediction']],
-      matrix(c(0, threshold, 0,
-               threshold, 1, 1),
-             byrow = TRUE,
-             ncol = 3),
-      right = FALSE
-    )
-    
-    # calculate ground truth classes
-    prediction[['zones']] <- prediction[['pred_class']] + prediction[['validation']]
-    prediction[['area']] <- cellSize(prediction[['zones']])
-    
-    # calculate zonal stats
-    areas <- zonal(prediction[['area']],
-                   prediction[['zones']],
-                   fun = 'sum')
-    
-    # calculate mean IoU
-    rts_iou <- ifelse(is.na(areas$area[3]),
-                      0,
-                      areas$area[3]/(areas$area[3] + areas$area[2]))
-    bg_iou <- areas$area[1]/(areas$area[1] + areas$area[2])
-    mean_iou <- c(mean_iou, mean(c(rts_iou, bg_iou)))
-    
-    
-  }
-  
-  output <- tibble(
-    id = get_rast_id(prediction),
-    threshold = thresholds,
-    mean_iou = mean_iou
-  )
-  
-  return(output)
-  
-}
-```
-
 ### pred_as_poly
 
 ```{r, include = FALSE}
-pred_as_poly <- function(prediction, threshold) {
+pred_as_poly <- function(prediction, threshold = 0.5) {
   layer <- prediction[['prediction']]
   layer[layer >= threshold] <- 1
   layer[layer < threshold] <- 0
@@ -821,14 +855,14 @@ rm(gd_maxar_input_folders, gd_planet_input_folders, gd_sentinel_input_folders)
 ### Maxar GeoTiffs
 
 ```{r, include = FALSE}
-maxar_pred_dir_old <- 'MAXAR20230621_022422_p21062023'
-maxar_pred_filepath_old <- paste0(loc_dir, '/maxar/predictions-', maxar_pred_dir_old)
-maxar_pred_files_old <- list.files(maxar_pred_filepath_old,
+maxar_pred_dir_zscore <- 'MAXAR20230623_161858_p25062023'
+maxar_pred_filepath_zscore <- paste0(loc_dir, '/maxar/predictions-', maxar_pred_dir_zscore)
+maxar_pred_files_zscore <- list.files(maxar_pred_filepath_zscore,
                                  pattern = 'tif$',
                                  full.names = TRUE)
-  
+
 maxar_preds <- map(maxar_pred_files, ~ import_pred(.x))
-maxar_preds_old <- map(maxar_pred_files_old, ~ import_pred(.x))
+maxar_preds_zscore <- map(maxar_pred_files_zscore, ~ import_pred(.x))
 
 rm(maxar_pred_files)
 ```
@@ -917,41 +951,41 @@ rm(tiles)
 ### Calculate Best RTS Threshold
 
 ```{r}
-maxar_rts_threshold <- maxar_preds %>% 
-  map_dfr(~ calc_rts_threshold(.x, seq(0.3, 0.7, by = 0.01))) %>%
-  group_by(threshold) %>%
-  summarise(mean_iou = mean(mean_iou)) %>%
-  ungroup() %>%
-  filter(mean_iou == max(mean_iou)) %>%
-  select(threshold) %>%
-  as.numeric()
-
-maxar_rts_threshold_old <- maxar_preds_old %>% 
-  map_dfr(~ calc_rts_threshold(.x, seq(0.3, 0.7, by = 0.01))) %>%
-  group_by(threshold) %>%
-  summarise(mean_iou = mean(mean_iou)) %>%
-  ungroup() %>%
-  filter(mean_iou == max(mean_iou)) %>%
-  select(threshold) %>%
-  as.numeric()
-
-planet_rts_threshold <- planet_preds %>% 
-  map_dfr(~ calc_rts_threshold(.x, seq(0.3, 0.7, by = 0.01))) %>%
-  group_by(threshold) %>%
-  summarise(mean_iou = mean(mean_iou)) %>%
-  ungroup() %>%
-  filter(mean_iou == max(mean_iou)) %>%
-  select(threshold) %>%
-  as.numeric()
-
-sentinel_rts_threshold <- sentinel_preds %>% 
-  map_dfr(~ calc_rts_threshold(.x, seq(0.3, 0.7, by = 0.01))) %>%
-  group_by(threshold) %>%
-  summarise(mean_iou = mean(mean_iou)) %>%
-  ungroup() %>%
-  filter(mean_iou == max(mean_iou)) %>%
-  select(threshold) %>%
-  as.numeric()
+# maxar_rts_threshold <- maxar_preds %>% 
+#   map_dfr(~ calc_rts_threshold(.x, seq(0.35, 0.6, by = 0.01))) %>%
+#   group_by(threshold) %>%
+#   summarise(mean_iou = mean(mean_iou)) %>%
+#   ungroup() %>%
+#   filter(mean_iou == max(mean_iou)) %>%
+#   select(threshold) %>%
+#   as.numeric()
+# 
+# maxar_rts_threshold_zscore <- maxar_preds_zscore %>% 
+#   map_dfr(~ calc_rts_threshold(.x, seq(0.35, 0.6, by = 0.01))) %>%
+#   group_by(threshold) %>%
+#   summarise(mean_iou = mean(mean_iou)) %>%
+#   ungroup() %>%
+#   filter(mean_iou == max(mean_iou)) %>%
+#   select(threshold) %>%
+#   as.numeric()
+# 
+# planet_rts_threshold <- planet_preds %>% 
+#   map_dfr(~ calc_rts_threshold(.x, seq(0.35, 0.6, by = 0.01))) %>%
+#   group_by(threshold) %>%
+#   summarise(mean_iou = mean(mean_iou)) %>%
+#   ungroup() %>%
+#   filter(mean_iou == max(mean_iou)) %>%
+#   select(threshold) %>%
+#   as.numeric()
+# 
+# sentinel_rts_threshold <- sentinel_preds %>% 
+#   map_dfr(~ calc_rts_threshold(.x, seq(0.35, 0.6, by = 0.01))) %>%
+#   group_by(threshold) %>%
+#   summarise(mean_iou = mean(mean_iou)) %>%
+#   ungroup() %>%
+#   filter(mean_iou == max(mean_iou)) %>%
+#   select(threshold) %>%
+#   as.numeric()
 ```
 Maxar RTS Threshold: `r maxar_rts_threshold`
 Planet RTS Threshold: `r planet_rts_threshold`
@@ -959,19 +993,35 @@ Sentinel RTS Threshold: `r sentinel_rts_threshold`
 
 ```{r}
 maxar_pred_polys <- maxar_preds %>%
-  map_dfr(~ pred_as_poly(.x, maxar_rts_threshold)) %>%
+  map_dfr(
+    ~ pred_as_poly(
+      .x#, maxar_rts_threshold
+      )
+    ) %>%
   mutate(imagery = 'Maxar')
 
-maxar_pred_polys_old <- maxar_preds_old %>%
-  map_dfr(~ pred_as_poly(.x, maxar_rts_threshold_old)) %>%
+maxar_pred_polys_zscore <- maxar_preds_zscore %>%
+  map_dfr(
+    ~ pred_as_poly(
+      .x#, maxar_rts_threshold_zscore
+      )
+    ) %>%
   mutate(imagery = 'Maxar')
 
 planet_pred_polys <- planet_preds %>%
-  map_dfr(~ pred_as_poly(.x, planet_rts_threshold)) %>%
+  map_dfr(
+    ~ pred_as_poly(
+      .x#, planet_rts_threshold
+      )
+    ) %>%
   mutate(imagery = 'Planet')
 
 sentinel_pred_polys <- sentinel_preds %>%
-  map_dfr(~ pred_as_poly(.x, sentinel_rts_threshold)) %>%
+  map_dfr(
+    ~ pred_as_poly(
+      .x#, sentinel_rts_threshold
+      )
+    ) %>%
   mutate(imagery = 'Sentinel-2')
 ```
 
@@ -1026,18 +1076,28 @@ rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 ## Convert Input Data to DF
 
 ```{r}
-input_data <- maxar_input %>%
-  map_dfr(~ input_as_df(.x)) %>%
+pred_ids <- c()
+for (pred in maxar_preds) {
+  pred_ids <- c(pred_ids, get_rast_id(pred))
+}
+
+maxar_input_filtered <- filter_input_data(maxar_input, pred_ids)
+planet_input_filtered <- filter_input_data(planet_input, pred_ids)
+sentinel_input_filtered <- filter_input_data(sentinel_input, pred_ids)
+
+input_data <- maxar_input_filtered %>%
+  map2_dfr(maxar_preds, ~ input_as_df(.x, .y)) %>%
   mutate(imagery = 'Maxar') %>%
-  rbind.data.frame(planet_input %>%
-                     map_dfr(~ input_as_df(.x)) %>%
+  rbind.data.frame(planet_input_filtered %>%
+                     map2_dfr(planet_preds, ~ input_as_df(.x, .y)) %>%
                      mutate(imagery = 'Planet')) %>%
-  rbind.data.frame(sentinel_input %>%
-                     map_dfr(~ input_as_df(.x)) %>%
+  rbind.data.frame(sentinel_input_filtered %>%
+                     map2_dfr(sentinel_preds, ~ input_as_df(.x, .y)) %>%
                      mutate(imagery = 'Sentinel-2')) %>%
   select(imagery, id, rts_class, x, y, 
          r, g, b, lum, nir, ndvi, ndwi, elev, sr, 
-         r_stretch, g_stretch, b_stretch, color_hex)
+         r_stretch, g_stretch, b_stretch, color_hex, prediction)
+print(nrow(input_data))
 ```
 
 
@@ -1834,7 +1894,7 @@ knitr::kable(polys %>%
 
 Visualize the RTS predictions
 
-```{r fig.width = 7, fig.height = 2.5}
+```{r fig.width = 12, fig.height = 4.8}
 pids <- unique(polys$id)
 
 walk(pids,
@@ -2113,6 +2173,55 @@ zonal_stats_figs[['ndvi_sd']]
 zonal_stats_figs[['ndwi_sd']]
 zonal_stats_figs[['sr_sd']]
 ```
+
+### Prediction Probability
+
+```{r}
+input_data_rts_summary <- input_data %>%
+  group_by(imagery, id, rts_class) %>%
+  summarise(across(c(r:sr, prediction), ~ mean(.x)))
+```
+
+```{r}
+ggplot(input_data) +
+  # geom_point() +
+  geom_bin_2d(data = input_data %>%
+                filter(rts_class == 'rts'),
+              aes(x = ndvi, y = prediction),
+              inherit.aes = FALSE) +
+  scale_fill_gradient(name = 'Density (RTS)',
+                      low = '#CCFF99',
+                      high = '#003300',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  new_scale('fill') +
+  geom_bin_2d(data = input_data %>%
+                filter(rts_class == 'bg'),
+              aes(x = ndvi, y = prediction),
+              inherit.aes = FALSE) +
+  scale_fill_gradient(name = 'Density (Background)',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ imagery) +
+  theme_bw()
+```
+
+```{r}
+ggplot(input_data,
+       aes(x = nir, y = prediction, color = rts_class),
+       alpha = 0.1) +
+  geom_point() +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(. ~ imagery) +
+  scale_color_manual(name = 'Ground Truth',
+                     values = c('#CFCECC', '#669900'),
+                     labels = c('RTS', 'Background')) +
+  theme_bw()
+```
+
 
 
 ## Read in Models from Google Drive
