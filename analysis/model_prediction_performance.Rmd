@@ -11,8 +11,6 @@ output:
 -   Possible to remove extra influence of multiple RTS within one tile?
 -   Figure out why my IoU scores don't quite match Yili's - Possible that this is being calculated on a different set of polygons? Still not sure if I need to remove classes that are missing from predictions.
 -   Decide whether to use best RTS threshold or 0.5
--   Figure out some sort of explanation method to figure out which cells were most important to predictions? Does this even make sense in a context where we get probabilities out of the model rather than a label?
--   Run some sort of analysis of probabilities and input data layer values?
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -39,6 +37,7 @@ library(Ryacas)
 library(ggnewscale)
 library(egg)
 library(ggsignif)
+library(ggfortify)
 library(tidyverse)
 ```
 
@@ -366,7 +365,7 @@ plot_prediction <- function(pid) {
       facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('mIoU:', round(mean_iou, 2))) +
       theme_bw() +
       theme(axis.title = element_blank(),
-            axis.text = element_blank)
+            axis.text = element_blank())
   )
 
 }
@@ -987,9 +986,6 @@ rm(tiles)
 #   select(threshold) %>%
 #   as.numeric()
 ```
-Maxar RTS Threshold: `r maxar_rts_threshold`
-Planet RTS Threshold: `r planet_rts_threshold`
-Sentinel RTS Threshold: `r sentinel_rts_threshold`
 
 ```{r}
 maxar_pred_polys <- maxar_preds %>%
@@ -1097,7 +1093,6 @@ input_data <- maxar_input_filtered %>%
   select(imagery, id, rts_class, x, y, 
          r, g, b, lum, nir, ndvi, ndwi, elev, sr, 
          r_stretch, g_stretch, b_stretch, color_hex, prediction)
-print(nrow(input_data))
 ```
 
 
@@ -1895,9 +1890,7 @@ knitr::kable(polys %>%
 Visualize the RTS predictions
 
 ```{r fig.width = 12, fig.height = 4.8}
-pids <- unique(polys$id)
-
-walk(pids,
+walk(pred_ids,
     ~ plot_prediction(.x))
 ```
 
@@ -2008,11 +2001,17 @@ ggplot(rts_pq %>%
 
 ```{r}
 zonal_stats <- input_data %>%
-  group_by(imagery, id, rts_class) %>%
-  summarise(across(r:sr, mean, .names = "{.col}_mean"),
+  left_join(polys %>%
+              as_tibble() %>%
+              select(id, imagery, rts_area, mean_iou, mean_iou_v2, 
+                     pq_ci, pq_ci_size, pq_ci_size_offset),
+            by = c('id', 'imagery')) %>%
+  group_by(imagery, id, rts_class, rts_area, mean_iou, mean_iou_v2, 
+           pq_ci, pq_ci_size, pq_ci_size_offset) %>%
+  summarise(across(c(prediction, r:sr), mean, .names = "{.col}_mean"),
             across(r:sr, sd, .names = "{.col}_sd")) %>%
   pivot_wider(names_from = 'rts_class', 
-              values_from = c(r_mean:sr_sd)) %>%
+              values_from = c(prediction_mean:sr_sd)) %>%
   mutate(r_mean_delta = (r_mean_rts - r_mean_bg),
          b_mean_delta = (b_mean_rts - b_mean_bg),
          g_mean_delta = (g_mean_rts - g_mean_bg),
@@ -2042,16 +2041,16 @@ zonal_stats <- input_data %>%
                                       rts_class == 'delta' ~ 'Delta'),
                             levels = c('RTS', 'Delta', 'Background'))) %>%
   pivot_wider(names_from = c('variable', 'metric'),
-              values_from = 'value') %>%
-  right_join(polys %>%
-               as_tibble() %>%
-               select(c('id', 'imagery', 'region', 'status', 'rts_area',
-                        'mean_iou', 'name_long', 'yg',
-                        'predict', 'predict_lwr', 'predict_upr',
-                        'rts_threshold',
-                        'pq_ci',
-                        'pq_ci_size')),
-             by = c('id', 'imagery'))
+              values_from = 'value')# %>%
+  # right_join(polys %>%
+  #              as_tibble() %>%
+  #              select(c('id', 'imagery', 'region', 'status', 'rts_area',
+  #                       'mean_iou', 'name_long', 'yg',
+  #                       'predict', 'predict_lwr', 'predict_upr',
+  #                       'rts_threshold',
+  #                       'pq_ci',
+  #                       'pq_ci_size')),
+  #            by = c('id', 'imagery'))
 ```
 
 ```{r}
@@ -2149,7 +2148,7 @@ zonal_stats_figs[['ndvi_mean']]
 zonal_stats_figs[['ndwi_mean']]
 ```
 
--   The standard deviation of elevation figure indicates that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily. I.e. smooth landscape with uneven RTS is easy for the model to find.
+-   The standard deviation of elevation (surface roughness) figure indicates that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily. I.e. smooth landscape with uneven RTS is easy for the model to find.
 
 ```{r, fig.width = 7, fig.height = 6}
 zonal_stats_figs[['elev_sd']]
@@ -2177,52 +2176,378 @@ zonal_stats_figs[['sr_sd']]
 ### Prediction Probability
 
 ```{r}
-input_data_rts_summary <- input_data %>%
-  group_by(imagery, id, rts_class) %>%
-  summarise(across(c(r:sr, prediction), ~ mean(.x)))
+rts_labeller <- as_labeller(c(Maxar = 'Maxar', Planet = 'Planet', `Sentinel-2` = '`Sentinel-2`',
+                              rts = 'RTS', bg = 'Background'),
+                            default = label_parsed)
+
 ```
 
+NIR/NDVI
+
 ```{r}
-ggplot(input_data) +
-  # geom_point() +
-  geom_bin_2d(data = input_data %>%
-                filter(rts_class == 'rts'),
-              aes(x = ndvi, y = prediction),
-              inherit.aes = FALSE) +
-  scale_fill_gradient(name = 'Density (RTS)',
-                      low = '#CCFF99',
-                      high = '#003300',
-                      trans = "log10",
-                      limits = c(1, 1000000)) +
-  new_scale('fill') +
-  geom_bin_2d(data = input_data %>%
-                filter(rts_class == 'bg'),
-              aes(x = ndvi, y = prediction),
-              inherit.aes = FALSE) +
-  scale_fill_gradient(name = 'Density (Background)',
+ggplot(input_data, aes(x = nir, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
                       high = '#000000',
                       trans = "log10",
                       limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NIR') +
+  scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
-  facet_grid(rts_class ~ imagery) +
+  facet_grid(rts_class ~ imagery,
+             labeller = rts_labeller) +
+  theme_bw()
+
+ggplot(input_data, aes(x = ndvi, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NDVI') +
+  scale_y_continuous(name = 'Prediction') +
+  # geom_bin_2d(data = input_data %>%
+  #               filter(rts_class == 'rts'),
+  #             aes(x = ndvi, y = prediction),
+  #             inherit.aes = FALSE) +
+  # scale_fill_gradient(name = 'Density (RTS)',
+  #                     low = '#CCFF99',
+  #                     high = '#003300',
+  #                     trans = "log10",
+  #                     limits = c(1, 1000000),
+  #                     guide = guide_legend(order = 1)) +
+  # new_scale('fill') +
+  # geom_bin_2d(data = input_data %>%
+  #               filter(rts_class == 'bg'),
+  #             aes(x = ndvi, y = prediction),
+  #             inherit.aes = FALSE) +
+  # scale_fill_gradient(name = 'Density (Background)',
+  #                     low = '#CCCCCC',
+  #                     high = '#000000',
+  #                     trans = "log10",
+  #                     limits = c(1, 1000000),
+  #                     guide = guide_legend(order = 2)) +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ imagery,
+             labeller = rts_labeller) +
   theme_bw()
 ```
+
+NDWI
 
 ```{r}
-ggplot(input_data,
-       aes(x = nir, y = prediction, color = rts_class),
-       alpha = 0.1) +
-  geom_point() +
+ggplot(input_data, aes(x = ndwi, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NDWI') +
+  scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
-  facet_grid(. ~ imagery) +
-  scale_color_manual(name = 'Ground Truth',
-                     values = c('#CFCECC', '#669900'),
-                     labels = c('RTS', 'Background')) +
+  facet_grid(rts_class ~ imagery,
+             labeller = rts_labeller) +
   theme_bw()
 ```
 
+Elevation
 
+```{r}
+ggplot(input_data, aes(x = elev, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'Relative Elevation') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ imagery,
+             labeller = rts_labeller) +
+  theme_bw()
+```
+
+Others
+
+```{r}
+ggplot(input_data, aes(x = r, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'Red') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ imagery,
+             labeller = rts_labeller) +
+  theme_bw()
+
+ggplot(input_data, aes(x = g, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'Green') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ imagery,
+             labeller = rts_labeller) +
+  theme_bw()
+
+ggplot(input_data, aes(x = b, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'Blue') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ imagery,
+             labeller = rts_labeller) +
+  theme_bw()
+
+ggplot(input_data, aes(x = sr, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'Shaded Relief') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ imagery,
+             labeller = rts_labeller) +
+  theme_bw()
+```
+
+### PCA Analysis
+
+```{r}
+zonal_stats_class <- zonal_stats %>%
+  filter(rts_class %in% c('RTS', 'Background'))
+
+zonal_stats_pca <- prcomp(zonal_stats_class %>%
+                            ungroup() %>%
+                            select(r_mean:b_mean, nir_mean:sr_mean,
+                                   r_sd:b_sd, nir_sd:sr_sd),
+                          center = TRUE,
+                          scale = TRUE)
+
+zonal_stats_class <- zonal_stats_class %>%
+  cbind(zonal_stats_pca[['x']])
+```
+
+PCA - Prediction quality color scheme
+
+```{r}
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 2,
+         color = 'pq_ci_size',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_manual(name = 'Prediction Quality', 
+                     labels = pq_labels,
+                     values = pq_colors) +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 3,
+         color = 'pq_ci_size',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_manual(name = 'Prediction Quality', 
+                     labels = pq_labels,
+                     values = pq_colors) +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 2,
+         y = 3,
+         color = 'pq_ci_size',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_manual(name = 'Prediction Quality', 
+                     labels = pq_labels,
+                     values = pq_colors) +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+```
+
+PCA - RTS probability color scheme
+
+```{r}
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 2,
+         color = 'prediction_mean_rts',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'Mean RTS Probability') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 3,
+         color = 'prediction_mean_rts',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'Mean RTS Probability') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 2,
+         y = 3,
+         color = 'prediction_mean_rts',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'Mean RTS Probability') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+```
+
+PCA - IoU color scheme
+
+```{r}
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 2,
+         color = 'mean_iou_v2',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'IoU') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 3,
+         color = 'mean_iou_v2',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'IoU') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 2,
+         y = 3,
+         color = 'mean_iou_v2',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'IoU') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+```
+
+PCA - RTS area color scheme
+
+```{r}
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 2,
+         color = 'rts_area',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'RTS Area') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 3,
+         color = 'rts_area',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'RTS Area') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 2,
+         y = 3,
+         color = 'rts_area',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_viridis(name = 'RTS Area') +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+```
 
 ## Read in Models from Google Drive
 
