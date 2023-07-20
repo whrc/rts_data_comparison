@@ -8,9 +8,12 @@ output:
 
 ## TODO:
 
--   Possible to remove extra influence of multiple RTS within one tile?
--   Figure out why my IoU scores don't quite match Yili's - Possible that this is being calculated on a different set of polygons? Still not sure if I need to remove classes that are missing from predictions.
--   Decide whether to use best RTS threshold or 0.5
+-   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
+-   Quality flags for ArcticDEM to help make sure that surface roughness boxplot is real? This is probably overkill.
+-   Calculate metric of feature shape and incorporate into analysis!
+-   Density plots showing prediction quality somehow. I've done a few, and I don't think this is going to help at all.
+-   some sort of figure and/or decision tree for how other researchers can choose what resolution/imagery quality is necessary for their analysis.
+-   Start picking figures to include in manuscript!
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -38,15 +41,8 @@ library(ggnewscale)
 library(egg)
 library(ggsignif)
 library(ggfortify)
+library(plotly)
 library(tidyverse)
-```
-
-```{python, include = FALSE}
-import json
-from keras_unet_collection import models, utils
-import shap
-from matplotlib import pyplot as plt
-import numpy as np
 ```
 
 ## Prep Google Drive Authentication
@@ -272,10 +268,22 @@ import_pred <- function(filepath) {
 }
 ```
 
-### lm_contrasts
+### lm_contrasts_pq_ci
 
 ```{r}
-lm_contrasts <- function(model) {
+lm_contrasts_pq_ci <- function(model) {
+  contrasts <- as_tibble(emmeans(model$fit,
+                                 pairwise ~ pq_ci,
+                                 adjust = 'tukey')$contrasts) %>%
+    mutate(star_label = assign_conf_stars(p.value)) %>%
+    select(contrast, estimate, se = SE, p_value = p.value, star_label)
+}
+```
+
+### lm_contrasts_pq_ci_size
+
+```{r}
+lm_contrasts_pq_ci_size <- function(model) {
   contrasts <- as_tibble(emmeans(model$fit,
                                  pairwise ~ pq_ci_size,
                                  adjust = 'tukey')$contrasts) %>%
@@ -284,13 +292,35 @@ lm_contrasts <- function(model) {
 }
 ```
 
+### lm_pq_ci
+
+```{r}
+lm_pq_ci <- function(df) {
+  model <- linear_reg() %>%
+    fit(value ~ pq_ci, 
+        data = df)
+  return(model)
+}
+```
+
+### lm_pq_ci_size
+
+```{r}
+lm_pq_ci_size <- function(df) {
+  model <- linear_reg() %>%
+    fit(value ~ pq_ci_size, 
+        data = df)
+  return(model)
+}
+```
+
 ### lm_summary
 
 ```{r}
 lm_summary <- function(model) {
-  model_output <- tidy(model) %>%
+  lm_output <- tidy(model) %>%
     rename_with(~ str_replace_all(., '\\.', '_'))
-  return(model_output)
+  return(lm_output)
 }
 ```
 
@@ -304,19 +334,6 @@ make_my_dir <- function(output_dir) {
   }
   
 }
-```
-
-### my_lm
-
-```{r}
-my_lm <- function(df) {
-  model <- linear_reg() %>%
-    fit(value ~ pq_ci_size, 
-        data = df)
-  return(model)
-}
-
-
 ```
 
 ### plot_prediction
@@ -374,16 +391,16 @@ plot_prediction <- function(pid) {
 ### plot_zonal_stats
 
 ```{r, warning = FALSE}
-plot_zonal_stats <- function(var) {
+plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
   
   rts_fig <- ggplot(zonal_stats %>%
                       filter(rts_class == 'RTS'), 
-                    aes(x = pq_ci_size, 
-                        y = .data[[var]], 
-                        color = pq_ci_size)) +
+                    aes(x = .data[[x_var]], 
+                        y = .data[[y_var]], 
+                        color = .data[[x_var]])) +
     geom_boxplot(outlier.shape = NA) +
-    geom_signif(data = zonal_stats_contrasts %>%
-                  filter(variable == var & rts_class == 'RTS'),
+    geom_signif(data = contrasts %>%
+                  filter(variable == y_var & rts_class == 'RTS'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
                     annotation = star_label),
                 stat="identity",
@@ -395,20 +412,20 @@ plot_zonal_stats <- function(var) {
     facet_grid(rts_class ~ imagery) +
     theme_bw() +
     theme(axis.title.x = element_blank()) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == var & rts_class == 'RTS') %>%
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'RTS') %>%
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
   
   delta_fig <- ggplot(zonal_stats %>%
                         filter(rts_class == 'Delta'), 
-                      aes(x = pq_ci_size, 
-                          y = .data[[var]], 
-                          color = pq_ci_size)) +
+                      aes(x = .data[[x_var]], 
+                          y = .data[[y_var]], 
+                          color = .data[[x_var]])) +
     geom_boxplot(outlier.shape = NA) +
-    geom_signif(data = zonal_stats_contrasts %>%
-                  filter(variable == var & rts_class == 'Delta'),
+    geom_signif(data = contrasts %>%
+                  filter(variable == y_var & rts_class == 'Delta'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
                     annotation = star_label),
                 stat="identity",
@@ -419,20 +436,20 @@ plot_zonal_stats <- function(var) {
     facet_grid(rts_class ~ imagery) +
     theme_bw() +
     theme(axis.title.x = element_blank()) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == var & rts_class == 'Delta') %>%
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'Delta') %>%
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
   
   bg_fig <- ggplot(zonal_stats %>%
                      filter(rts_class == 'Background'), 
-                   aes(x = pq_ci_size, 
-                       y = .data[[var]], 
-                       color = pq_ci_size)) +
+                   aes(x = .data[[x_var]], 
+                       y = .data[[y_var]], 
+                       color = .data[[x_var]])) +
     geom_boxplot(outlier.shape = NA) +
-    geom_signif(data = zonal_stats_contrasts %>%
-                  filter(variable == var & rts_class == 'Background'),
+    geom_signif(data = contrasts %>%
+                  filter(variable == y_var & rts_class == 'Background'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
                     annotation = star_label),
                 stat="identity",
@@ -443,8 +460,8 @@ plot_zonal_stats <- function(var) {
     facet_grid(rts_class ~ imagery) +
     theme_bw() +
     theme(axis.title.x = element_blank()) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == var & rts_class == 'Background') %>%
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'Background') %>%
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
@@ -1795,7 +1812,9 @@ ggplot(polys,
   scale_shape(name = 'Imagery') +
   theme_bw()# +
   # coord_cartesian(ylim = c(0, 1))
+```
 
+```{r, fig.width = 12}
 ggplot(polys, 
        aes(x = rts_area, 
            y = mean_iou)) +
@@ -1818,7 +1837,9 @@ ggplot(polys,
   theme_bw() +
   # coord_cartesian(ylim = c(0, 1)) +
   facet_grid(. ~ imagery)
+```
 
+```{r}
 ggplot(polys, 
        aes(x = rts_area, 
            y = mean_iou)) +
@@ -1849,7 +1870,9 @@ ggplot(polys,
   scale_y_continuous(name = 'IoU') +
   theme_bw()# +
   # coord_cartesian(ylim = c(0, 1))
+```
 
+```{r, fig.width = 12}
 ggplot(polys, 
        aes(x = rts_area, 
            y = mean_iou)) +
@@ -1957,30 +1980,30 @@ polys <- polys %>%
                      levels = c(unique(rts_pq$id))))
 ```
 
-```{r, fig.width = 4, fig.height = 6}
+```{r}
 ggplot(polys, 
-       aes(x = pq_ci_size_offset, y = id, color = imagery)) +
+       aes(x = id, y = pq_ci_size_offset, color = imagery)) +
   geom_point() +
-  scale_x_continuous(name = 'Prediction Quality',
+  scale_y_reverse(name = 'Prediction Quality',
                      breaks = c(1, 2, 3),
                      labels = pq_labels) +
-  scale_y_discrete(name = 'RTS Features') +
+  scale_x_discrete(name = 'RTS Features') +
   scale_color_manual(values = imagery_colors) +
   # facet_grid(name_long ~ ., scales = 'free_y') +
   theme_bw() +
-  theme(axis.text.y = element_blank(),
+  theme(axis.text.x = element_blank(),
         legend.title = element_blank(),
         panel.grid.minor = element_blank()) +
-  coord_fixed(ratio = 1/10)
+  coord_fixed(ratio = 10)
 ```
 
-```{r, fig.width = 4, fig.height = 6}
+```{r}
 ggplot(rts_pq %>%
          filter(n != 0), 
-       aes(x = pq_ci_size, y = id, color = pq_ci_size, size = n)) +
+       aes(x = id, y = pq_ci_size, color = pq_ci_size, size = n)) +
   geom_point() +
-  scale_x_discrete(name = 'Prediction Quality') +
-  scale_y_discrete(
+  scale_y_discrete(name = 'Prediction Quality') +
+  scale_x_discrete(
     name = 'RTS Features',
     limits = rev
     ) +
@@ -1992,21 +2015,23 @@ ggplot(rts_pq %>%
   theme_bw() +
   theme(
     # axis.text.x = element_blank(),
-    axis.text.y = element_blank()
+    axis.text.x = element_blank()
     ) +
-  coord_fixed(ratio = 1/10)
+  coord_fixed(ratio = 10)
 ```
 
 ### Zonal Statistics
 
 ```{r}
-zonal_stats <- input_data %>%
+input_data <- input_data %>%
   left_join(polys %>%
               as_tibble() %>%
-              select(id, imagery, rts_area, mean_iou, mean_iou_v2, 
+              select(id, imagery, region, rts_area, mean_iou, mean_iou_v2, 
                      pq_ci, pq_ci_size, pq_ci_size_offset),
-            by = c('id', 'imagery')) %>%
-  group_by(imagery, id, rts_class, rts_area, mean_iou, mean_iou_v2, 
+            by = c('id', 'imagery'))
+
+zonal_stats <- input_data %>%
+  group_by(imagery, id, region, rts_class, rts_area, mean_iou, mean_iou_v2, 
            pq_ci, pq_ci_size, pq_ci_size_offset) %>%
   summarise(across(c(prediction, r:sr), mean, .names = "{.col}_mean"),
             across(r:sr, sd, .names = "{.col}_sd")) %>%
@@ -2041,33 +2066,35 @@ zonal_stats <- input_data %>%
                                       rts_class == 'delta' ~ 'Delta'),
                             levels = c('RTS', 'Delta', 'Background'))) %>%
   pivot_wider(names_from = c('variable', 'metric'),
-              values_from = 'value')# %>%
-  # right_join(polys %>%
-  #              as_tibble() %>%
-  #              select(c('id', 'imagery', 'region', 'status', 'rts_area',
-  #                       'mean_iou', 'name_long', 'yg',
-  #                       'predict', 'predict_lwr', 'predict_upr',
-  #                       'rts_threshold',
-  #                       'pq_ci',
-  #                       'pq_ci_size')),
-  #            by = c('id', 'imagery'))
+              values_from = 'value')
 ```
 
 ```{r}
-model_output <- zonal_stats %>%
-  select(imagery:sr_sd, pq_ci_size) %>%
+lm_output <- zonal_stats %>%
+  select(imagery:sr_sd, pq_ci, pq_ci_size) %>%
   pivot_longer(r_mean:sr_sd, names_to = 'variable', values_to = 'value') %>%
   group_by(rts_class, imagery, variable) %>%
   nest() %>% 
-  mutate(models = map(data, possibly(my_lm, otherwise = NA)),
-         summary = map(models, possibly(lm_summary, otherwise = NA)),
-         contrasts = map(models, possibly(lm_contrasts, otherwise = NA)))
+  mutate(models_pq_ci = map(data, 
+                            possibly(lm_pq_ci, otherwise = NA)),
+         summary_pq_ci = map(models_pq_ci, 
+                             possibly(lm_summary, otherwise = NA)),
+         contrasts_pq_ci = map(models_pq_ci, 
+                               possibly(lm_contrasts_pq_ci, 
+                                        otherwise = NA)),
+         models_pq_ci_size = map(data, 
+                                 possibly(lm_pq_ci_size, otherwise = NA)),
+         summary_pq_ci_size = map(models_pq_ci_size, 
+                                  possibly(lm_summary, otherwise = NA)),
+         contrasts_pq_ci_size = map(models_pq_ci_size, 
+                                    possibly(lm_contrasts_pq_ci_size, 
+                                             otherwise = NA)))
 ```
 
 ```{r}
-zonal_stats_contrasts <- model_output %>%
-  select(imagery, rts_class, variable, contrasts) %>%
-  unnest(cols = c(contrasts)) %>%
+zonal_stats_contrasts_pq_ci <- lm_output %>%
+  select(imagery, rts_class, variable, contrasts_pq_ci) %>%
+  unnest(cols = c(contrasts_pq_ci)) %>%
   filter(p_value <= 0.1) %>%
   separate_wider_delim(contrast, 
                        delim = ' - ', 
@@ -2082,7 +2109,61 @@ zonal_stats_contrasts <- model_output %>%
 ```{r}
 # calculate figure y-limits by hand
 # (1.5*IQR is the upper and lower whisker limit; 1.05 is the default axis expansion by ggplot)
-zonal_stats_limits <- zonal_stats %>%
+zonal_stats_limits_pq_ci <- zonal_stats %>%
+  select(imagery:sr_sd, pq_ci) %>%
+  pivot_longer(r_mean:sr_sd,  names_to = 'variable', values_to = 'value') %>%
+group_by(imagery, pq_ci, rts_class, variable) %>%
+  summarise(lwr = min(trim_outliers(value), na.rm = TRUE),
+            upr = max(trim_outliers(value), na.rm = TRUE)) %>%
+  mutate(lim_lwr = upr - (upr - lwr)*1.05,
+         lim_upr = lwr + (upr - lwr)*1.05) %>%
+  group_by(variable, rts_class) %>%
+  summarise(lwr = min(lim_lwr),
+            upr = max(lim_upr))
+```
+
+```{r}
+zonal_stats_contrasts_pq_ci <- zonal_stats_contrasts_pq_ci %>%
+  left_join(zonal_stats_limits_pq_ci, by = c('variable', 'rts_class')) %>%
+  group_by(imagery, rts_class, variable) %>%
+  mutate(n = n(),
+         y = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.15,
+                       TRUE ~ upr),
+         upr = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.25,
+                         TRUE ~ lwr + (upr - lwr)*1.1))
+
+# add new upr limits back to limits tibble
+zonal_stats_limits_pq_ci <- zonal_stats_limits_pq_ci %>%
+  left_join(zonal_stats_contrasts_pq_ci %>%
+              select(imagery, rts_class, variable, upr) %>%
+              group_by(rts_class, variable) %>%
+              summarise(new_upr = max(upr)),
+            by = c('rts_class', 'variable')) %>%
+  mutate(upr = case_when(!is.na(new_upr) ~ new_upr,
+                         TRUE ~ upr)) %>%
+  select(-new_upr)
+
+```
+
+```{r}
+zonal_stats_contrasts_pq_ci_size <- lm_output %>%
+  select(imagery, rts_class, variable, contrasts_pq_ci_size) %>%
+  unnest(cols = c(contrasts_pq_ci_size)) %>%
+  filter(p_value <= 0.1) %>%
+  separate_wider_delim(contrast, 
+                       delim = ' - ', 
+                       names = c('x_min', 'x_max'), 
+                       cols_remove = FALSE) %>%
+  mutate(x_min = as.numeric(factor(x_min,
+                                   levels = pq_labels)) + 0.05,
+         x_max = as.numeric(factor(x_max,
+                                   levels = pq_labels)) - 0.05)
+```
+
+```{r}
+# calculate figure y-limits by hand
+# (1.5*IQR is the upper and lower whisker limit; 1.05 is the default axis expansion by ggplot)
+zonal_stats_limits_pq_ci_size <- zonal_stats %>%
   select(imagery:sr_sd, pq_ci_size) %>%
   pivot_longer(r_mean:sr_sd,  names_to = 'variable', values_to = 'value') %>%
 group_by(imagery, pq_ci_size, rts_class, variable) %>%
@@ -2096,8 +2177,8 @@ group_by(imagery, pq_ci_size, rts_class, variable) %>%
 ```
 
 ```{r}
-zonal_stats_contrasts <- zonal_stats_contrasts %>%
-  left_join(zonal_stats_limits, by = c('variable', 'rts_class')) %>%
+zonal_stats_contrasts_pq_ci_size <- zonal_stats_contrasts_pq_ci_size %>%
+  left_join(zonal_stats_limits_pq_ci_size, by = c('variable', 'rts_class')) %>%
   group_by(imagery, rts_class, variable) %>%
   mutate(n = n(),
          y = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.15,
@@ -2106,8 +2187,8 @@ zonal_stats_contrasts <- zonal_stats_contrasts %>%
                          TRUE ~ lwr + (upr - lwr)*1.1))
 
 # add new upr limits back to limits tibble
-zonal_stats_limits <- zonal_stats_limits %>%
-  left_join(zonal_stats_contrasts %>%
+zonal_stats_limits_pq_ci_size <- zonal_stats_limits_pq_ci_size %>%
+  left_join(zonal_stats_contrasts_pq_ci_size %>%
               select(imagery, rts_class, variable, upr) %>%
               group_by(rts_class, variable) %>%
               summarise(new_upr = max(upr)),
@@ -2128,49 +2209,83 @@ sr = shaded relief
 variables <- colnames(zonal_stats %>%
                         ungroup() %>%
                         select(r_mean:sr_sd))
-zonal_stats_figs <- map(variables,
-                        ~ plot_zonal_stats(.x))
-names(zonal_stats_figs) <- variables
+zonal_stats_figs_pq_ci <- map(
+  variables,
+  ~ plot_zonal_stats(
+    x_var = 'pq_ci',
+    y_var = .x, 
+    contrasts = zonal_stats_contrasts_pq_ci,
+    limits = zonal_stats_limits_pq_ci)
+)
+names(zonal_stats_figs_pq_ci) <- variables
+
+zonal_stats_figs_pq_ci_size <- map(
+  variables,
+  ~ plot_zonal_stats(
+    x = 'pq_ci_size',
+    y = .x, 
+    contrasts = zonal_stats_contrasts_pq_ci_size,
+    limits = zonal_stats_limits_pq_ci_size)
+)
+names(zonal_stats_figs_pq_ci_size) <- variables
 ```
 
 A few takeaway points:
 
--   NIR and NDVI (mean) figures indicate that RTS are predicted poorly where background cells have low NDVI/plant growth (plants reflect NIR, so have a higher NIR value). I.e. it's harder for the model to find the RTS where there's not much plant growth across the landscape.
+-   NIR and NDVI (mean) figures indicate that RTS are predicted poorly where background cells have low NDVI/plant growth (plants reflect NIR, so have a higher NIR value). I.e. it's harder for the model to find the RTS where there's not much plant growth across the landscape. Also important to note is that NDVI is coming from Sentinel-2, so is at lower resolution than than the RGB imagery. This could be introducting error that might explain the unexpected somewhat higher NDVI in well predicted small RTS features.
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['nir_mean']]
-zonal_stats_figs[['ndvi_mean']]
+zonal_stats_figs_pq_ci[['nir_mean']]
+zonal_stats_figs_pq_ci_size[['nir_mean']]
+zonal_stats_figs_pq_ci[['ndvi_mean']]
+zonal_stats_figs_pq_ci_size[['ndvi_mean']]
 ```
 
 -   NDWI (mean) figure indicates that RTS features are predicted better where it's drier (fewer lakes?).
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['ndwi_mean']]
+zonal_stats_figs_pq_ci[['ndwi_mean']]
+zonal_stats_figs_pq_ci_size[['ndwi_mean']]
 ```
 
 -   The standard deviation of elevation (surface roughness) figure indicates that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily. I.e. smooth landscape with uneven RTS is easy for the model to find.
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['elev_sd']]
+zonal_stats_figs_pq_ci[['elev_sd']]
+zonal_stats_figs_pq_ci_size[['elev_sd']]
 ```
 
 I didn't find much interesting about the rest of these figures, but they are included  here for completeness:
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['r_mean']]
-zonal_stats_figs[['g_mean']]
-zonal_stats_figs[['b_mean']]
-zonal_stats_figs[['lum_mean']]
-zonal_stats_figs[['elev_mean']]
-zonal_stats_figs[['sr_mean']]
-zonal_stats_figs[['r_sd']]
-zonal_stats_figs[['g_sd']]
-zonal_stats_figs[['b_sd']]
-zonal_stats_figs[['lum_sd']]
-zonal_stats_figs[['nir_sd']]
-zonal_stats_figs[['ndvi_sd']]
-zonal_stats_figs[['ndwi_sd']]
-zonal_stats_figs[['sr_sd']]
+zonal_stats_figs_pq_ci[['r_mean']]
+zonal_stats_figs_pq_ci[['g_mean']]
+zonal_stats_figs_pq_ci[['b_mean']]
+zonal_stats_figs_pq_ci[['lum_mean']]
+zonal_stats_figs_pq_ci[['elev_mean']]
+zonal_stats_figs_pq_ci[['sr_mean']]
+zonal_stats_figs_pq_ci[['r_sd']]
+zonal_stats_figs_pq_ci[['g_sd']]
+zonal_stats_figs_pq_ci[['b_sd']]
+zonal_stats_figs_pq_ci[['lum_sd']]
+zonal_stats_figs_pq_ci[['nir_sd']]
+zonal_stats_figs_pq_ci[['ndvi_sd']]
+zonal_stats_figs_pq_ci[['ndwi_sd']]
+zonal_stats_figs_pq_ci[['sr_sd']]
+zonal_stats_figs_pq_ci_size[['r_mean']]
+zonal_stats_figs_pq_ci_size[['g_mean']]
+zonal_stats_figs_pq_ci_size[['b_mean']]
+zonal_stats_figs_pq_ci_size[['lum_mean']]
+zonal_stats_figs_pq_ci_size[['elev_mean']]
+zonal_stats_figs_pq_ci_size[['sr_mean']]
+zonal_stats_figs_pq_ci_size[['r_sd']]
+zonal_stats_figs_pq_ci_size[['g_sd']]
+zonal_stats_figs_pq_ci_size[['b_sd']]
+zonal_stats_figs_pq_ci_size[['lum_sd']]
+zonal_stats_figs_pq_ci_size[['nir_sd']]
+zonal_stats_figs_pq_ci_size[['ndvi_sd']]
+zonal_stats_figs_pq_ci_size[['ndwi_sd']]
+zonal_stats_figs_pq_ci_size[['sr_sd']]
 ```
 
 ### Prediction Probability
@@ -2233,6 +2348,104 @@ ggplot(input_data, aes(x = ndvi, y = prediction)) +
   facet_grid(rts_class ~ imagery,
              labeller = rts_labeller) +
   theme_bw()
+```
+
+```{r}
+ggplot(input_data %>%
+         filter(imagery == 'Maxar'), 
+       aes(x = nir, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NIR') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ pq_ci_size) +
+  theme_bw() +
+  ggtitle('Maxar')
+
+ggplot(input_data %>%
+         filter(imagery == 'Planet'), 
+       aes(x = nir, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NIR') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ pq_ci_size) +
+  theme_bw() +
+  ggtitle('Planet')
+
+ggplot(input_data %>%
+         filter(imagery == 'Sentinel-2'), 
+       aes(x = nir, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NIR') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ pq_ci_size) +
+  theme_bw() +
+  ggtitle('Sentinel-2')
+
+ggplot(input_data %>%
+         filter(imagery == 'Maxar'), 
+       aes(x = ndvi, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NDVI') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ pq_ci_size) +
+  theme_bw() +
+  ggtitle('Maxar')
+
+ggplot(input_data %>%
+         filter(imagery == 'Planet'), 
+       aes(x = ndvi, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NDVI') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ pq_ci_size) +
+  theme_bw() +
+  ggtitle('Planet')
+
+ggplot(input_data %>%
+         filter(imagery == 'Sentinel-2'), 
+       aes(x = ndvi, y = prediction)) +
+  geom_bin_2d() +
+  scale_fill_gradient(name = 'Count',
+                      low = '#CCCCCC',
+                      high = '#000000',
+                      trans = "log10",
+                      limits = c(1, 1000000)) +
+  scale_x_continuous(name = 'NDVI') +
+  scale_y_continuous(name = 'Prediction') +
+  geom_hline(yintercept = 0.5, linetype = 'dashed') +
+  facet_grid(rts_class ~ pq_ci_size) +
+  theme_bw() +
+  ggtitle('Sentinel-2')
 ```
 
 NDWI
@@ -2335,7 +2548,9 @@ ggplot(input_data, aes(x = sr, y = prediction)) +
 
 ```{r}
 zonal_stats_class <- zonal_stats %>%
-  filter(rts_class %in% c('RTS', 'Background'))
+  filter(rts_class %in% c('RTS', 'Background')) %>%
+  mutate(rts_class = factor(rts_class,
+                            levels = c('RTS', 'Background')))
 
 zonal_stats_pca <- prcomp(zonal_stats_class %>%
                             ungroup() %>%
@@ -2349,6 +2564,20 @@ zonal_stats_class <- zonal_stats_class %>%
 ```
 
 PCA - Prediction quality color scheme
+
+```{r}
+plot_ly(zonal_stats_class, 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~pq_ci_size,
+        colors = pq_colors,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
 
 ```{r}
 autoplot(zonal_stats_pca, 
@@ -2402,7 +2631,88 @@ autoplot(zonal_stats_pca,
   theme_bw()
 ```
 
+Prediction Quality (without size)
+
+```{r}
+plot_ly(zonal_stats_class, 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~pq_ci,
+        colors = pq_colors,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
+
+```{r}
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 2,
+         color = 'pq_ci',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_manual(name = 'Prediction Quality', 
+                     labels = pq_labels,
+                     values = pq_colors) +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 1,
+         y = 3,
+         color = 'pq_ci_size',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_manual(name = 'Prediction Quality', 
+                     labels = pq_labels,
+                     values = pq_colors) +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+autoplot(zonal_stats_pca, 
+         data = zonal_stats_class, 
+         x = 2,
+         y = 3,
+         color = 'pq_ci_size',
+         shape = 'rts_class', 
+         loadings = TRUE, loadings.colour = 'black',
+         loadings.label = TRUE, loadings.label.size = 4,
+         loadings.label.colour = 'black') +
+  scale_color_manual(name = 'Prediction Quality', 
+                     labels = pq_labels,
+                     values = pq_colors) +
+  scale_shape_manual(name = 'RTS Class',
+                     labels = c('RTS', 'Background', 'Delta'),
+                     values = c(16, 1, 2)) +
+  theme_bw()
+```
+
 PCA - RTS probability color scheme
+
+```{r}
+plot_ly(zonal_stats_class, 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~prediction_mean_rts,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
 
 ```{r}
 autoplot(zonal_stats_pca, 
@@ -2454,6 +2764,19 @@ autoplot(zonal_stats_pca,
 PCA - IoU color scheme
 
 ```{r}
+plot_ly(zonal_stats_class, 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~mean_iou_v2,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
+
+```{r}
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
          x = 1,
@@ -2503,6 +2826,19 @@ autoplot(zonal_stats_pca,
 PCA - RTS area color scheme
 
 ```{r}
+plot_ly(zonal_stats_class, 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~rts_area,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
+
+```{r}
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
          x = 1,
@@ -2549,84 +2885,15 @@ autoplot(zonal_stats_pca,
   theme_bw()
 ```
 
-## Read in Models from Google Drive
+### Confounding Factors
 
-```{python, include = FALSE}
-# maxar model
-with open('./data/maxar/20230621_022422/params.json', 'r') as f:
-  PARAMS = json.load(f)
-
-maxar_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
-                  n_labels=2,
-                  filter_num_down=PARAMS['model']['filter_num'],
-                  filter_num_skip='auto',
-                  filter_num_aggregate='auto',
-                  stack_num_down=PARAMS['model']['stack_num_down'],
-                  stack_num_up=PARAMS['model']['stack_num_up'],
-                  activation=PARAMS['model']['activation'],
-                  output_activation=PARAMS['model']['out_activ'],
-                  batch_norm=PARAMS['model']['batch_norm'],
-                  pool=PARAMS['model']['pooling'],
-                  unpool=PARAMS['model']['unpool'],
-                  deep_supervision=PARAMS['model']['deep_supervision'],
-                  backbone=PARAMS['model']['backbone'],
-                  weights=None,
-                  freeze_backbone=PARAMS['model']['freeze_backbone'],
-                  freeze_batch_norm=PARAMS['model']['freeze_bn'],
-                  name='unet3plus')
-#import saved model weights
-model_path = './data/maxar/20230621_022422/cp-0074-valiou0.695.ckpt'
-maxar_model.load_weights(model_path).expect_partial()
-
-# planet model
-with open('./data/planet/20230621_190115/params.json', 'r') as f:
-  PARAMS = json.load(f)
-
-planet_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
-                  n_labels=2,
-                  filter_num_down=PARAMS['model']['filter_num'],
-                  filter_num_skip='auto',
-                  filter_num_aggregate='auto',
-                  stack_num_down=PARAMS['model']['stack_num_down'],
-                  stack_num_up=PARAMS['model']['stack_num_up'],
-                  activation=PARAMS['model']['activation'],
-                  output_activation=PARAMS['model']['out_activ'],
-                  batch_norm=PARAMS['model']['batch_norm'],
-                  pool=PARAMS['model']['pooling'],
-                  unpool=PARAMS['model']['unpool'],
-                  deep_supervision=PARAMS['model']['deep_supervision'],
-                  backbone=PARAMS['model']['backbone'],
-                  weights=None,
-                  freeze_backbone=PARAMS['model']['freeze_backbone'],
-                  freeze_batch_norm=PARAMS['model']['freeze_bn'],
-                  name='unet3plus')
-#import saved model weights
-model_path = './data/planet/20230621_190115/cp-0085-valiou0.702.ckpt'
-planet_model.load_weights(model_path).expect_partial()
-
-# sentinel model
-with open('./data/sentinel/20230621_171002/params.json', 'r') as f:
-  PARAMS = json.load(f)
-
-planet_model = models.unet_3plus_2d(input_size=PARAMS['model']['input_size'],
-                  n_labels=2,
-                  filter_num_down=PARAMS['model']['filter_num'],
-                  filter_num_skip='auto',
-                  filter_num_aggregate='auto',
-                  stack_num_down=PARAMS['model']['stack_num_down'],
-                  stack_num_up=PARAMS['model']['stack_num_up'],
-                  activation=PARAMS['model']['activation'],
-                  output_activation=PARAMS['model']['out_activ'],
-                  batch_norm=PARAMS['model']['batch_norm'],
-                  pool=PARAMS['model']['pooling'],
-                  unpool=PARAMS['model']['unpool'],
-                  deep_supervision=PARAMS['model']['deep_supervision'],
-                  backbone=PARAMS['model']['backbone'],
-                  weights=None,
-                  freeze_backbone=PARAMS['model']['freeze_backbone'],
-                  freeze_batch_norm=PARAMS['model']['freeze_bn'],
-                  name='unet3plus')
-#import saved model weights
-model_path = './data/sentinel/20230621_171002/cp-0081-valiou0.659.ckpt'
-planet_model.load_weights(model_path).expect_partial()
+```{r}
+zonal_stats_class %>%
+  group_by(imagery, id, region) %>%
+  summarise(ndwi_mean = mean(ndwi_mean),
+            rts_area = first(rts_area),
+            region = first(region)) %>%
+ggplot(aes(x = ndwi_mean, y = rts_area, color = region)) +
+  geom_point()
 ```
+
