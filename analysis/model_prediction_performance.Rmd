@@ -8,13 +8,12 @@ output:
 
 ## TODO:
 
--   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
 -   Calculate metric of feature shape and incorporate into analysis!
 -   Density plots showing prediction quality somehow. I've done a few, and I don't think this is going to help at all.
 -   some sort of figure and/or decision tree for how other researchers can choose what resolution/imagery quality is necessary for their analysis.
 -   Start picking figures to include in manuscript!
--   Try comparing performance with RTS IoUs
 -   Histogram of rts_iou scores for each imagery type. Larger SD is less desirable.
+-   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -338,34 +337,63 @@ make_my_dir <- function(output_dir) {
 }
 ```
 
-### nls_boot_predict
+### my_nlsBootPredict (wity my desired quantiles)
 
 ```{r}
-nls_boot_predict <- function(boot_ci, newdata, lwr, upr) {
-  
-  coefboot <- boot_ci[['coefboot']]
-  
-  output <- tibble()
-  for (new_value in as.numeric(newdata$rts_area)) {
-    
-    predictions <- c()
-    for (row_idx in 1:nrow(coefboot)) {
-      coefs <- coefboot[row_idx,]
-      predictions <- c(predictions, coefs[['Vmax']] * new_value / (coefs[['Km']] + new_value))
-    }
-    
-    prediction <- quantile(predictions, probs = c(0.025, 0.5, 0.975))
-    prediction_df <- tibble(rts_area = new_value,
-                            lwr = prediction[1],
-                            median = prediction[2],
-                            upr = prediction[3])
-    output <- rbind(output,
-                    prediction_df)
-    
+my_nlsBootPredict <- function (nlsBoot, newdata, 
+                               interval = c("confidence", "prediction")) 
+{
+  if (!inherits(nlsBoot, "nlsBoot"))
+    stop("Use only with 'nlsBoot' objects")
+  if (missing(newdata))
+  {
+    newdata <- get(as.character(nlsBoot$nls$data))
   }
+  nlsformula <- formula(nlsBoot$nls)
+  nlsresid <- resid(nlsBoot$nls)
+  param <- nlsBoot$coefboot
+  bootparam <- nlsBoot$coefboot
+  niter <- length(nlsBoot$rse)
   
-  return(output)
+  "formula2function"<-function(formu){
+    arg1		<- all.vars(formu)
+    arg2		<- vector("list",length(arg1))
+    names(arg2)	<- arg1
+    Args		<- do.call("alist",arg2)
+    fmodele		<- as.function(c(Args,formu))
+    return(fmodele)
+  }
+  f1 <- formula2function(formula(nlsformula)[[3]])
+  vardep <- all.vars(nlsformula[[2]])
+  varindep <- intersect(all.vars(nlsformula[[3]]), colnames(newdata))
   
+  ## vector of mean predictions on newdata with one bootstrap sample  
+  one.mean.pred <- function(i)
+  {
+    do.call(f1, as.list(c(param[i,], newdata[varindep])))
+  }
+  boot.mean.pred <- sapply(1:niter, one.mean.pred)
+  
+  if (interval == "confidence")
+  {
+    recap.boot.mean.pred <- t(apply(boot.mean.pred, 1, 
+                                    quantile, c(.5, .25, .75))) 
+    colnames(recap.boot.mean.pred) <- c("Median", "25%", "75%")
+    return(recap.boot.mean.pred)
+  } else
+  {
+    ## vector of individual predictions on newdata with one bootstrap sample
+    one.indiv.pred <- function(i)
+    {
+      boot.mean.pred[, i] + sample(scale(nlsresid, scale=FALSE), 
+                                   size = nrow(newdata), replace=TRUE)
+    }
+    boot.indiv.pred <- sapply(1:niter, one.indiv.pred)
+    recap.boot.indiv.pred <- t(apply(boot.indiv.pred, 1, 
+                                     quantile, c(.5, .25, .75))) 
+    colnames(recap.boot.indiv.pred) <- c("Median", "25%", "75%")
+    return(recap.boot.indiv.pred)
+  }
 }
 ```
 
@@ -1530,119 +1558,108 @@ newdata <- tibble(rts_area = seq(min(polys$rts_area), max(polys$rts_area), lengt
 ```
 
 ```{r}
-test <- nls_boot_predict(maxar_iou_boot, newdata, lwr = 0.025, upr = 0.975)
+# maxar_iou_predict <- my_nlsBootPredict(maxar_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(maxar_iou_predict, './data/models/maxar_iou_predict.RData')
 
+maxar_iou_predict <- readRDS('./data/models/maxar_iou_predict.RData')
 maxar_iou_ci <- newdata %>%
-  mutate(predict = predict(maxar_iou_nls, newdata),
-         predict_lwr = maxar_iou_boot[["bootCI"]][2, 2] * rts_area / 
-           (maxar_iou_boot[["bootCI"]][1, 3] + rts_area),
-         predict_upr = maxar_iou_boot[["bootCI"]][2, 3] * rts_area / 
-           (maxar_iou_boot[["bootCI"]][1, 2] + rts_area))
+  cbind(maxar_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
+
+# maxar_rts_iou_predict <- my_nlsBootPredict(maxar_rts_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(maxar_rts_iou_predict, './data/models/maxar_rts_iou_predict.RData')
 
 maxar_rts_iou_ci <- newdata %>%
-  mutate(predict = predict(maxar_rts_iou_nls, newdata),
-         predict_lwr = maxar_rts_iou_boot[["bootCI"]][2, 2] * rts_area / 
-           (maxar_rts_iou_boot[["bootCI"]][1, 3] + rts_area),
-         predict_upr = maxar_rts_iou_boot[["bootCI"]][2, 3] * rts_area / 
-           (maxar_rts_iou_boot[["bootCI"]][1, 2] + rts_area))
+  cbind(maxar_rts_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 ```
 
 ```{r}
+# planet_iou_predict <- my_nlsBootPredict(planet_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(planet_iou_predict, './data/models/planet_iou_predict.RData')
+
+planet_iou_predict <- readRDS('./data/models/planet_iou_predict.RData')
 planet_iou_ci <- newdata %>%
-  mutate(predict = predict(planet_iou_nls, newdata),
-         predict_lwr = planet_iou_boot[["bootCI"]][2, 2] * rts_area / 
-           (planet_iou_boot[["bootCI"]][1, 3] + rts_area),
-         predict_upr = planet_iou_boot[["bootCI"]][2, 3] * rts_area / 
-           (planet_iou_boot[["bootCI"]][1, 2] + rts_area))
+  cbind(planet_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
+
+# planet_rts_iou_predict <- my_nlsBootPredict(planet_rts_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(planet_rts_iou_predict, './data/models/planet_rts_iou_predict.RData')
 
 planet_rts_iou_ci <- newdata %>%
-  mutate(predict = predict(planet_rts_iou_nls, newdata),
-         predict_lwr = planet_rts_iou_boot[["bootCI"]][2, 2] * rts_area / 
-           (planet_rts_iou_boot[["bootCI"]][1, 3] + rts_area),
-         predict_upr = planet_rts_iou_boot[["bootCI"]][2, 3] * rts_area / 
-           (planet_rts_iou_boot[["bootCI"]][1, 2] + rts_area))
+  cbind(planet_rts_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 ```
 
 ```{r}
+# sentinel_iou_predict <- my_nlsBootPredict(sentinel_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(sentinel_iou_predict, './data/models/sentinel_iou_predict.RData')
+
+sentinel_iou_predict <- readRDS('./data/models/sentinel_iou_predict.RData')
 sentinel_iou_ci <- newdata %>%
-  mutate(predict = predict(sentinel_iou_nls, newdata),
-         predict_lwr = sentinel_iou_boot[["bootCI"]][2, 2] * rts_area / 
-           (sentinel_iou_boot[["bootCI"]][1, 3] + rts_area),
-         predict_upr = sentinel_iou_boot[["bootCI"]][2, 3] * rts_area / 
-           (sentinel_iou_boot[["bootCI"]][1, 2] + rts_area))
+  cbind(sentinel_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
+
+# sentinel_rts_iou_predict <- my_nlsBootPredict(sentinel_rts_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(sentinel_rts_iou_predict, './data/models/sentinel_rts_iou_predict.RData')
 
 sentinel_rts_iou_ci <- newdata %>%
-  mutate(predict = predict(sentinel_rts_iou_nls, newdata),
-         predict_lwr = sentinel_rts_iou_boot[["bootCI"]][2, 2] * rts_area / 
-           (sentinel_rts_iou_boot[["bootCI"]][1, 3] + rts_area),
-         predict_upr = sentinel_rts_iou_boot[["bootCI"]][2, 3] * rts_area / 
-           (sentinel_rts_iou_boot[["bootCI"]][1, 2] + rts_area))
+  cbind(sentinel_rts_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 ```
 
 ```{r}
 # Add predictions to `polys`
-mean_iou_predictions <- c(predict(maxar_iou_nls, 
-                                  filter(polys, imagery == 'Maxar')),
-                          predict(planet_iou_nls, 
-                                  filter(polys, imagery == 'Planet')),
-                          predict(sentinel_iou_nls, 
-                                  filter(polys, imagery == 'Sentinel-2')))
+mean_iou_predictions <- rbind(
+  my_nlsBootPredict(maxar_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Maxar'),
+                    interval = 'prediction'),
+  my_nlsBootPredict(planet_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Planet'),
+                    interval = 'prediction'),
+  my_nlsBootPredict(sentinel_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Sentinel-2'),
+                    interval = 'prediction')
+  )
 
-rts_iou_predictions <- c(predict(maxar_iou_nls, 
-                                 filter(polys, imagery == 'Maxar')),
-                         predict(planet_iou_nls, 
-                                 filter(polys, imagery == 'Planet')),
-                         predict(sentinel_iou_nls, 
-                                 filter(polys, imagery == 'Sentinel-2')))
+rts_iou_predictions <- rbind(
+  my_nlsBootPredict(maxar_rts_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Maxar'),
+                    interval = 'prediction'),
+  my_nlsBootPredict(planet_rts_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Planet'),
+                    interval = 'prediction'),
+  my_nlsBootPredict(sentinel_rts_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Sentinel-2'),
+                    interval = 'prediction')
+  )
 
 polys <- polys %>%
   mutate(
-    mean_iou_pred = mean_iou_predictions,
-    mean_iou_pred_lwr = case_when(
-      imagery == 'Maxar' ~ 
-        maxar_iou_boot[["bootCI"]][2, 2] * rts_area / 
-        (maxar_iou_boot[["bootCI"]][1, 3] + rts_area),
-      imagery == 'Planet' ~ 
-        planet_iou_boot[["bootCI"]][2, 2] * rts_area / 
-        (planet_iou_boot[["bootCI"]][1, 3] + rts_area),
-      imagery == 'Sentinel-2' ~ 
-        sentinel_iou_boot[["bootCI"]][2, 2] * rts_area / 
-        (sentinel_iou_boot[["bootCI"]][1, 3] + rts_area)
-    ),
-    mean_iou_pred_upr = case_when(
-      imagery == 'Maxar' ~ 
-        maxar_iou_boot[["bootCI"]][2, 3] * rts_area / 
-        (maxar_iou_boot[["bootCI"]][1, 2] + rts_area),
-      imagery == 'Planet' ~ 
-        planet_iou_boot[["bootCI"]][2, 3] * rts_area / 
-        (planet_iou_boot[["bootCI"]][1, 2] + rts_area),
-      imagery == 'Sentinel-2' ~ 
-        sentinel_iou_boot[["bootCI"]][2, 3] * rts_area / 
-        (sentinel_iou_boot[["bootCI"]][1, 2] + rts_area)
-    ),
-      rts_iou_pred = rts_iou_predictions,
-    rts_iou_pred_lwr = case_when(
-      imagery == 'Maxar' ~ 
-        maxar_rts_iou_boot[["bootCI"]][2, 2] * rts_area / 
-        (maxar_rts_iou_boot[["bootCI"]][1, 3] + rts_area),
-      imagery == 'Planet' ~ 
-        planet_rts_iou_boot[["bootCI"]][2, 2] * rts_area / 
-        (planet_rts_iou_boot[["bootCI"]][1, 3] + rts_area),
-      imagery == 'Sentinel-2' ~ 
-        sentinel_rts_iou_boot[["bootCI"]][2, 2] * rts_area / 
-        (sentinel_rts_iou_boot[["bootCI"]][1, 3] + rts_area)
-    ),
-    rts_iou_pred_upr = case_when(
-      imagery == 'Maxar' ~ 
-        maxar_rts_iou_boot[["bootCI"]][2, 3] * rts_area / 
-        (maxar_rts_iou_boot[["bootCI"]][1, 2] + rts_area),
-      imagery == 'Planet' ~ 
-        planet_rts_iou_boot[["bootCI"]][2, 3] * rts_area / 
-        (planet_rts_iou_boot[["bootCI"]][1, 2] + rts_area),
-      imagery == 'Sentinel-2' ~ 
-        sentinel_rts_iou_boot[["bootCI"]][2, 3] * rts_area / 
-        (sentinel_rts_iou_boot[["bootCI"]][1, 2] + rts_area)
-    )
+    mean_iou_pred = mean_iou_predictions[, 1],
+    mean_iou_pred_lwr = mean_iou_predictions[, 2],
+    mean_iou_pred_upr = mean_iou_predictions[, 3],
+    rts_iou_pred = rts_iou_predictions[, 1],
+    rts_iou_pred_lwr = rts_iou_predictions[, 2],
+    rts_iou_pred_upr = rts_iou_predictions[, 3]
   )
 ```
 
@@ -1673,11 +1690,11 @@ rm(maxar_iou_nls, maxar_iou_ci, maxar_rts_iou_nls, maxar_rts_iou_ci,
 ggplot(polys, aes(x = rts_area, y = mean_iou, color = imagery)) +
   geom_point(size = 1) +
   geom_ribbon(data = mean_iou_ci,
-            aes(x = rts_area, ymin = predict_lwr, ymax = predict_upr, group = imagery),
+            aes(x = rts_area, ymin = lwr, ymax = upr, group = imagery),
             alpha = 0.2,
             inherit.aes = FALSE) +
   geom_line(data = mean_iou_ci, 
-            aes(x = rts_area, y = predict, color = imagery),
+            aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'Mean IoU') +
@@ -1689,11 +1706,11 @@ ggplot(polys, aes(x = rts_area, y = mean_iou, color = imagery)) +
 ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
   geom_point(size = 1) +
   geom_ribbon(data = rts_iou_ci,
-            aes(x = rts_area, ymin = predict_lwr, ymax = predict_upr, group = imagery),
+            aes(x = rts_area, ymin = lwr, ymax = upr, group = imagery),
             alpha = 0.2,
             inherit.aes = FALSE) +
   geom_line(data = rts_iou_ci, 
-            aes(x = rts_area, y = predict, color = imagery),
+            aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'RTS IoU') +
@@ -1870,7 +1887,7 @@ rts_iou_thresholds <- polys %>%
   group_by(imagery) %>%
   summarise(rts_iou_mean = mean(rts_iou),
             rts_sd = sd(rts_iou)) %>%
-  mutate(rts_iou_threshold = rts_iou_mean + rts_sd)
+  mutate(rts_iou_threshold = rts_iou_mean)
 
 polys <- polys %>%
   mutate(
@@ -1917,12 +1934,12 @@ ggplot(polys,
                      values = pq_colors) +
   new_scale('color') +
   geom_ribbon(data = rts_iou_ci,
-              aes(x = rts_area, ymin = predict_lwr, ymax = predict_upr),
+              aes(x = rts_area, ymin = lwr, ymax = upr),
               fill = 'gray50',
               alpha = 0.2,
               inherit.aes = FALSE) +
   geom_line(data = rts_iou_ci, 
-            aes(x = rts_area, y = predict, color = imagery),
+            aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   scale_color_manual(name = 'Imagery',
                      values = imagery_colors) +
@@ -1943,13 +1960,13 @@ ggplot(polys,
   new_scale('color') +
   geom_ribbon(data = rts_iou_ci,
               aes(x = rts_area, 
-                  ymin = predict_lwr, 
-                  ymax = predict_upr),
+                  ymin = lwr, 
+                  ymax = upr),
               fill = 'gray50',
               alpha = 0.2,
               inherit.aes = FALSE) +
   geom_line(data = rts_iou_ci,
-            aes(x = rts_area, y = predict, color = imagery),
+            aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   geom_vline(data = size_thresholds,
              aes(xintercept = rts_threshold, color = imagery),
@@ -2055,29 +2072,6 @@ ggplot(polys,
   theme(axis.text.x = element_blank(),
         legend.title = element_blank(),
         panel.grid.minor = element_blank()) +
-  coord_fixed(ratio = 10)
-```
-
-```{r}
-ggplot(rts_pq %>%
-         filter(n != 0), 
-       aes(x = id, y = pq_ci_size, color = pq_ci_size, size = n)) +
-  geom_point() +
-  scale_y_discrete(name = 'Prediction Quality') +
-  scale_x_discrete(
-    name = 'RTS Features',
-    limits = rev
-    ) +
-  scale_color_manual(name = 'Prediction Quality',
-                   values = pq_colors) +
-  scale_size(name = 'Model Count',
-             breaks = c(1, 2, 3),
-             range = c(0.5, 2.5)) +
-  theme_bw() +
-  theme(
-    # axis.text.x = element_blank(),
-    axis.text.x = element_blank()
-    ) +
   coord_fixed(ratio = 10)
 ```
 
