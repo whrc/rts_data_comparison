@@ -4,14 +4,12 @@ output:
   pdf_document: default
 ---
 
-# RTS Model V2 Performance Analysis
+# RTS Model Imagery Performance Analysis
 
 ## TODO:
 
 -   some sort of figure and/or decision tree for how other researchers can choose what resolution/imagery quality is necessary for their analysis.
--   Think more about NDWI and sr zonal stats. What exactly do the sr values indicate?
 -   Start picking figures to include in manuscript!
--   Histogram of rts_iou scores for each imagery type. Larger SD is less desirable.
 -   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
 
 ## Set-Up
@@ -268,10 +266,10 @@ import_pred <- function(filepath) {
 }
 ```
 
-### lm_contrasts_pq_ci
+### lm_contrasts_pq
 
 ```{r}
-lm_contrasts_pq_ci <- function(model) {
+lm_contrasts_pq <- function(model) {
   contrasts <- as_tibble(emmeans(model$fit,
                                  pairwise ~ pq_ci,
                                  adjust = 'dunnettx')$contrasts) %>%
@@ -280,35 +278,12 @@ lm_contrasts_pq_ci <- function(model) {
 }
 ```
 
-### lm_contrasts_pq_ci_size
+### lm_pq
 
 ```{r}
-lm_contrasts_pq_ci_size <- function(model) {
-  contrasts <- as_tibble(emmeans(model$fit,
-                                 pairwise ~ pq_ci_size,
-                                 adjust = 'dunnettx')$contrasts) %>%
-    mutate(star_label = assign_conf_stars(p.value)) %>%
-    select(contrast, estimate, se = SE, p_value = p.value, star_label)
-}
-```
-
-### lm_pq_ci
-
-```{r}
-lm_pq_ci <- function(df) {
+lm_pq <- function(df) {
   model <- linear_reg() %>%
     fit(value ~ pq_ci, 
-        data = df)
-  return(model)
-}
-```
-
-### lm_pq_ci_size
-
-```{r}
-lm_pq_ci_size <- function(df) {
-  model <- linear_reg() %>%
-    fit(value ~ pq_ci_size, 
         data = df)
   return(model)
 }
@@ -336,7 +311,7 @@ make_my_dir <- function(output_dir) {
 }
 ```
 
-### my_nlsBootPredict (wity my desired quantiles)
+### my_nlsBootPredict
 
 ```{r}
 my_nlsBootPredict <- function (nlsBoot, newdata, 
@@ -461,11 +436,13 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
                     aes(x = .data[[x_var]], 
                         y = .data[[y_var]], 
                         color = .data[[x_var]])) +
-    geom_boxplot(outlier.shape = NA) +
+    geom_boxplot(
+      # outlier.shape = NA
+      ) +
     geom_signif(data = contrasts %>%
                   filter(variable == y_var & rts_class == 'RTS'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
-                    annotation = star_label),
+                    annotation = star_label, group = contrast),
                 stat="identity",
                 manual = TRUE,
                 tip_length = 0.1,
@@ -480,17 +457,19 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
-  
+
   delta_fig <- ggplot(zonal_stats %>%
                         filter(rts_class == 'Delta'), 
                       aes(x = .data[[x_var]], 
                           y = .data[[y_var]], 
                           color = .data[[x_var]])) +
-    geom_boxplot(outlier.shape = NA) +
+    geom_boxplot(
+      # outlier.shape = NA
+      ) +
     geom_signif(data = contrasts %>%
                   filter(variable == y_var & rts_class == 'Delta'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
-                    annotation = star_label),
+                    annotation = star_label, group = contrast),
                 stat="identity",
                 manual = TRUE,
                 inherit.aes = FALSE) +
@@ -510,11 +489,13 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
                    aes(x = .data[[x_var]], 
                        y = .data[[y_var]], 
                        color = .data[[x_var]])) +
-    geom_boxplot(outlier.shape = NA) +
+    geom_boxplot(
+      # outlier.shape = NA
+      ) +
     geom_signif(data = contrasts %>%
                   filter(variable == y_var & rts_class == 'Background'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
-                    annotation = star_label),
+                    annotation = star_label, group = contrast),
                 stat="identity",
                 manual = TRUE,
                 inherit.aes = FALSE) +
@@ -528,7 +509,7 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
-  
+
   zonal_stats_fig <- ggarrange(rts_fig +
                                  theme(axis.text.x = element_blank(),
                                        axis.ticks.x = element_blank(),
@@ -1533,6 +1514,7 @@ maxar_iou_boot <- readRDS('./data/models/maxar_iou_boot.RData')
 
 maxar_rts_iou_nls <- readRDS('./data/models/maxar_rts_iou_nls.RData')
 maxar_rts_iou_boot <- readRDS('./data/models/maxar_rts_iou_boot.RData')
+summary(maxar_rts_iou_nls)
 ```
 
 ```{r}
@@ -1559,6 +1541,7 @@ planet_iou_boot <- readRDS('./data/models/planet_iou_boot.RData')
 
 planet_rts_iou_nls <- readRDS('./data/models/planet_rts_iou_nls.RData')
 planet_rts_iou_boot <- readRDS('./data/models/planet_rts_iou_boot.RData')
+summary(planet_rts_iou_nls)
 ```
 
 ```{r}
@@ -1585,6 +1568,7 @@ sentinel_iou_boot <- readRDS('./data/models/sentinel_iou_boot.RData')
 
 sentinel_rts_iou_nls <- readRDS('./data/models/sentinel_rts_iou_nls.RData')
 sentinel_rts_iou_boot <- readRDS('./data/models/sentinel_rts_iou_boot.RData')
+summary(sentinel_rts_iou_nls)
 ```
 
 Bootstrap predictions for plotting the `nls` models
@@ -1736,7 +1720,8 @@ ggplot(polys, aes(x = rts_area, y = mean_iou, color = imagery)) +
             aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'Mean IoU') +
+  scale_y_continuous(name = 'Mean IoU',
+                     limits = c(0, 0.93)) +
   scale_color_manual(values = imagery_colors,
                      labels = imagery_labels) +
   theme_bw() +
@@ -1846,7 +1831,7 @@ maxar_d1 <- D(expression(y = 0.7254422 * x / (2123.6825320 + x)), name = 'x')
 planet_d1 <- D(expression(y = 0.6906648 * x / (2498.0072184 + x)), name = 'x')
 sentinel_d1 <- D(expression(y = 0.5895414 * x / (2885.9723242 + x)), name = 'x')
 
-# estimate where the derivative crosses 1e-05
+# estimate where the derivative crosses 1e-06
 estimate_grid <- tibble(rts_area = seq(10000, 40000, by = 0.1))
 
 maxar_est <- estimate_grid %>%
@@ -1857,15 +1842,15 @@ sentinel_est <- estimate_grid %>%
   mutate(slope_est = eval_expression(sentinel_d1, rts_area))
 
 maxar_cross <- maxar_est %>%
-  slice(which.min(abs(1e-05-slope_est))) %>%
+  slice(which.min(abs(1e-06-slope_est))) %>%
   select(rts_area) %>%
   as.numeric() # find closest to 1e-05
 planet_cross <- planet_est %>%
-  slice(which.min(abs(1e-05-slope_est))) %>%
+  slice(which.min(abs(1e-06-slope_est))) %>%
   select(rts_area) %>%
   as.numeric() # find closest to 1e-05
 sentinel_cross <- sentinel_est %>%
-  slice(which.min(abs(1e-05-slope_est))) %>%
+  slice(which.min(abs(1e-06-slope_est))) %>%
   select(rts_area) %>%
   as.numeric() # find closest to 1e-05
 
@@ -2023,297 +2008,8 @@ ggplot(polys,
 knitr::kable(size_thresholds)
 knitr::kable(polys %>%
                as_tibble() %>%
-               count(imagery, pq_ci_size) %>%
-               pivot_wider(names_from = pq_ci_size, values_from = n))
-```
-
-Visualize the RTS predictions
-
-```{r fig.width = 12, fig.height = 4.8}
-walk(pred_ids,
-    ~ plot_prediction(.x))
-```
-
-Maxar High Quality Predictions
-
-```{r}
-# get polygon data
-current_data <- polys %>%
-  filter(pq_ci_size == 'High' & imagery == 'Maxar') %>%
-  select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, val_geometry, 
-         pred_geometry)
-
-# prep RGB data
-current_rgb <- input_data %>%
-  filter(pq_ci_size == 'High' & imagery == 'Maxar') %>%
-  full_join(current_data %>%
-              select(id, imagery, rts_iou),
-            by = c('imagery', 'id'))
-
-plots <- map(
-  unique(as.character(current_data$id)),
-  ~ ggplot(data = current_data %>%
-             filter(id == .x)) +
-    geom_raster(data = current_rgb %>%
-                  filter(id == .x),
-                aes(x = x, y = y, fill = color_hex),
-                inherit.aes = FALSE) +
-    scale_fill_manual(breaks = levels(input_data$color_hex),
-                      values = levels(input_data$color_hex),
-                      guide = 'none') +
-    geom_sf(aes(geometry = bbox_geometry),
-            color = 'black',
-            fill = 'transparent') +
-    geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    geom_sf(aes(geometry = pred_geometry,
-                color = 'Prediction'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    scale_color_manual(name = '',
-                       values = c(pq_colors[1], 'gray90')) +
-    theme_bw() +
-    theme(axis.title = element_blank(),
-          axis.text = element_blank(),
-          axis.ticks = element_blank()))
-plots
-```
-
-Maxar Low Quality Predictions
-
-```{r}
-# get polygon data
-current_data <- polys %>%
-  filter(pq_ci_size == 'Low' & imagery == 'Maxar') %>%
-  select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, val_geometry, 
-         pred_geometry)
-
-# prep RGB data
-current_rgb <- input_data %>%
-  filter(pq_ci_size == 'Low' & imagery == 'Maxar') %>%
-  full_join(current_data %>%
-              select(id, imagery, rts_iou),
-            by = c('imagery', 'id'))
-
-plots <- map(
-  unique(as.character(current_data$id)),
-  ~ ggplot(data = current_data %>%
-             filter(id == .x)) +
-    geom_raster(data = current_rgb %>%
-                  filter(id == .x),
-                aes(x = x, y = y, fill = color_hex),
-                inherit.aes = FALSE) +
-    scale_fill_manual(breaks = levels(input_data$color_hex),
-                      values = levels(input_data$color_hex),
-                      guide = 'none') +
-    geom_sf(aes(geometry = bbox_geometry),
-            color = 'black',
-            fill = 'transparent') +
-    geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    geom_sf(aes(geometry = pred_geometry,
-                color = 'Prediction'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    scale_color_manual(name = '',
-                       values = c(pq_colors[3], 'gray90')) +
-    theme_bw() +
-    theme(axis.title = element_blank(),
-          axis.text = element_blank(),
-          axis.ticks = element_blank()))
-plots
-```
-
-Planet High Quality Predictions
-
-```{r}
-# get polygon data
-current_data <- polys %>%
-  filter(pq_ci_size == 'High' & imagery == 'Planet') %>%
-  select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, val_geometry, 
-         pred_geometry)
-
-# prep RGB data
-current_rgb <- input_data %>%
-  filter(pq_ci_size == 'High' & imagery == 'Planet') %>%
-  full_join(current_data %>%
-              select(id, imagery, rts_iou),
-            by = c('imagery', 'id'))
-
-plots <- map(
-  unique(as.character(current_data$id)),
-  ~ ggplot(data = current_data %>%
-             filter(id == .x)) +
-    geom_raster(data = current_rgb %>%
-                  filter(id == .x),
-                aes(x = x, y = y, fill = color_hex),
-                inherit.aes = FALSE) +
-    scale_fill_manual(breaks = levels(input_data$color_hex),
-                      values = levels(input_data$color_hex),
-                      guide = 'none') +
-    geom_sf(aes(geometry = bbox_geometry),
-            color = 'black',
-            fill = 'transparent') +
-    geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    geom_sf(aes(geometry = pred_geometry,
-                color = 'Prediction'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    scale_color_manual(name = '',
-                       values = c(pq_colors[1], 'gray90')) +
-    theme_bw() +
-    theme(axis.title = element_blank(),
-          axis.text = element_blank(),
-          axis.ticks = element_blank()))
-plots
-```
-
-Planet Low Quality Predictions
-
-```{r}
-# get polygon data
-current_data <- polys %>%
-  filter(pq_ci_size == 'Low' & imagery == 'Planet') %>%
-  select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, val_geometry, 
-         pred_geometry)
-
-# prep RGB data
-current_rgb <- input_data %>%
-  filter(pq_ci_size == 'Low' & imagery == 'Planet') %>%
-  full_join(current_data %>%
-              select(id, imagery, rts_iou),
-            by = c('imagery', 'id'))
-
-plots <- map(
-  unique(as.character(current_data$id)),
-  ~ ggplot(data = current_data %>%
-             filter(id == .x)) +
-    geom_raster(data = current_rgb %>%
-                  filter(id == .x),
-                aes(x = x, y = y, fill = color_hex),
-                inherit.aes = FALSE) +
-    scale_fill_manual(breaks = levels(input_data$color_hex),
-                      values = levels(input_data$color_hex),
-                      guide = 'none') +
-    geom_sf(aes(geometry = bbox_geometry),
-            color = 'black',
-            fill = 'transparent') +
-    geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    geom_sf(aes(geometry = pred_geometry,
-                color = 'Prediction'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    scale_color_manual(name = '',
-                       values = c(pq_colors[3], 'gray90')) +
-    theme_bw() +
-    theme(axis.title = element_blank(),
-          axis.text = element_blank(),
-          axis.ticks = element_blank()))
-plots
-```
-
-Sentinel High Quality Predictions
-
-```{r}
-# get polygon data
-current_data <- polys %>%
-  filter(pq_ci_size == 'High' & imagery == 'Sentinel-2') %>%
-  select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, val_geometry, 
-         pred_geometry)
-
-# prep RGB data
-current_rgb <- input_data %>%
-  filter(pq_ci_size == 'High' & imagery == 'Sentinel-2') %>%
-  full_join(current_data %>%
-              select(id, imagery, rts_iou),
-            by = c('imagery', 'id'))
-
-plots <- map(
-  unique(as.character(current_data$id)),
-  ~ ggplot(data = current_data %>%
-             filter(id == .x)) +
-    geom_raster(data = current_rgb %>%
-                  filter(id == .x),
-                aes(x = x, y = y, fill = color_hex),
-                inherit.aes = FALSE) +
-    scale_fill_manual(breaks = levels(input_data$color_hex),
-                      values = levels(input_data$color_hex),
-                      guide = 'none') +
-    geom_sf(aes(geometry = bbox_geometry),
-            color = 'black',
-            fill = 'transparent') +
-    geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    geom_sf(aes(geometry = pred_geometry,
-                color = 'Prediction'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    scale_color_manual(name = '',
-                       values = c(pq_colors[1], 'gray90')) +
-    theme_bw() +
-    theme(axis.title = element_blank(),
-          axis.text = element_blank(),
-          axis.ticks = element_blank()))
-plots
-```
-
-Sentinel Low Quality Predictions
-
-```{r}
-# get polygon data
-current_data <- polys %>%
-  filter(pq_ci_size == 'Low' & imagery == 'Sentinel-2') %>%
-  select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, val_geometry, 
-         pred_geometry)
-
-# prep RGB data
-current_rgb <- input_data %>%
-  filter(pq_ci_size == 'Low' & imagery == 'Sentinel-2') %>%
-  full_join(current_data %>%
-              select(id, imagery, rts_iou),
-            by = c('imagery', 'id'))
-
-plots <- map(
-  unique(as.character(current_data$id)),
-  ~ ggplot(data = current_data %>%
-             filter(id == .x)) +
-    geom_raster(data = current_rgb %>%
-                  filter(id == .x),
-                aes(x = x, y = y, fill = color_hex),
-                inherit.aes = FALSE) +
-    scale_fill_manual(breaks = levels(input_data$color_hex),
-                      values = levels(input_data$color_hex),
-                      guide = 'none') +
-    geom_sf(aes(geometry = bbox_geometry),
-            color = 'black',
-            fill = 'transparent') +
-    geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    geom_sf(aes(geometry = pred_geometry,
-                color = 'Prediction'),
-            fill = 'transparent',
-            linewidth = 0.5) +
-    scale_color_manual(name = '',
-                       values = c(pq_colors[3], 'gray90')) +
-    theme_bw() +
-    theme(axis.title = element_blank(),
-          axis.text = element_blank(),
-          axis.ticks = element_blank()))
-plots
+               count(imagery, pq_ci) %>%
+               pivot_wider(names_from = pq_ci, values_from = n))
 ```
 
 Is performance class the same across imagery sources for most RTS features?
@@ -2321,42 +2017,42 @@ Is performance class the same across imagery sources for most RTS features?
 ```{r}
 polys <- polys %>%
   mutate(
-    pq_ci_size_offset = case_when(
-      imagery == 'Maxar' ~ as.numeric(pq_ci_size) - 0.2,
-      imagery == 'Planet' ~ as.numeric(pq_ci_size),
-      imagery == 'Sentinel-2' ~ as.numeric(pq_ci_size) + 0.2
+    pq_ci_offset = case_when(
+      imagery == 'Maxar' ~ as.numeric(pq_ci) - 0.2,
+      imagery == 'Planet' ~ as.numeric(pq_ci),
+      imagery == 'Sentinel-2' ~ as.numeric(pq_ci) + 0.2
       )
     )
 
 rts_pq <- polys %>%
   as_tibble() %>%
-  select(id, imagery, rts_area, name_long, pq_ci_size) %>%
+  select(id, imagery, rts_area, name_long, pq_ci) %>%
   mutate(
-    pq_ci_size_high = case_when(pq_ci_size == 'High' ~ 1,
+    pq_ci_high = case_when(pq_ci == 'High' ~ 1,
                                 TRUE ~ 0),
-    pq_ci_size_expected = case_when(pq_ci_size == 'Expected' ~ 1,
+    pq_ci_expected = case_when(pq_ci == 'Expected' ~ 1,
                                     TRUE ~ 0),
-    pq_ci_size_low = case_when(pq_ci_size == 'Low' ~ 1,
+    pq_ci_low = case_when(pq_ci == 'Low' ~ 1,
                                TRUE ~ 0)
   ) %>%
   group_by(id) %>%
-  summarise(High = sum(pq_ci_size_high),
-            Expected = sum(pq_ci_size_expected),
-            Low = sum(pq_ci_size_low)) %>%
+  summarise(High = sum(pq_ci_high),
+            Expected = sum(pq_ci_expected),
+            Low = sum(pq_ci_low)) %>%
   pivot_longer(High:Low, 
-               names_to = 'pq_ci_size', 
+               names_to = 'pq_ci', 
                values_to = 'n') %>%
   group_by(id) %>%
   mutate(
-    pq_ci_size = factor(pq_ci_size,
+    pq_ci = factor(pq_ci,
                         levels = c('High', 'Expected', 'Low')),
     group_max = max(n),
-    group_pq_max = pq_ci_size[which(n == max(n))]
+    group_pq_max = pq_ci[which(n == max(n))]
   ) %>%
   ungroup() %>%
   mutate(
     group_pq_2nd = case_when(
-      n == 1 ~ pq_ci_size,
+      n == 1 ~ pq_ci,
       TRUE ~ NA
       ),
     plotting_order = case_when(
@@ -2381,7 +2077,7 @@ polys <- polys %>%
 
 ```{r}
 ggplot(polys, 
-       aes(x = id, y = pq_ci_size_offset, color = imagery)) +
+       aes(x = id, y = pq_ci_offset, color = imagery)) +
   geom_point() +
   scale_y_reverse(name = 'Prediction Quality',
                      breaks = c(1, 2, 3),
@@ -2403,12 +2099,14 @@ input_data <- input_data %>%
   left_join(polys %>%
               as_tibble() %>%
               select(id, imagery, region, rts_area, rts_iou, mean_iou, mean_iou_v2, 
-                     pq_ci, pq_ci_size, pq_ci_size_offset),
+                     pq_ci, pq_ci_size, pq_ci_offset),
             by = c('id', 'imagery'))
+```
 
+```{r}
 zonal_stats <- input_data %>%
-  group_by(imagery, id, region, rts_class, rts_area, rts_iou, mean_iou, mean_iou_v2, 
-           pq_ci, pq_ci_size, pq_ci_size_offset) %>%
+  group_by(imagery, id, region, rts_class, rts_area, rts_iou, mean_iou, 
+           mean_iou_v2, pq_ci, pq_ci_size, pq_ci_offset) %>%
   summarise(across(c(prediction, r:sr), mean, .names = "{.col}_mean"),
             across(r:sr, sd, .names = "{.col}_sd")) %>%
   pivot_wider(names_from = 'rts_class', 
@@ -2451,26 +2149,19 @@ lm_output <- zonal_stats %>%
   pivot_longer(r_mean:sr_sd, names_to = 'variable', values_to = 'value') %>%
   group_by(rts_class, imagery, variable) %>%
   nest() %>% 
-  mutate(models_pq_ci = map(data, 
-                            possibly(lm_pq_ci, otherwise = NA)),
-         summary_pq_ci = map(models_pq_ci, 
-                             possibly(lm_summary, otherwise = NA)),
-         contrasts_pq_ci = map(models_pq_ci, 
-                               possibly(lm_contrasts_pq_ci, 
-                                        otherwise = NA)),
-         models_pq_ci_size = map(data, 
-                                 possibly(lm_pq_ci_size, otherwise = NA)),
-         summary_pq_ci_size = map(models_pq_ci_size, 
-                                  possibly(lm_summary, otherwise = NA)),
-         contrasts_pq_ci_size = map(models_pq_ci_size, 
-                                    possibly(lm_contrasts_pq_ci_size, 
-                                             otherwise = NA)))
+  mutate(models_pq = map(data, 
+                         possibly(lm_pq, otherwise = NA)),
+         summary_pq = map(models_pq, 
+                          possibly(lm_summary, otherwise = NA)),
+         contrasts_pq = map(models_pq, 
+                            possibly(lm_contrasts_pq, 
+                                     otherwise = NA)))
 ```
 
 ```{r}
-zonal_stats_contrasts_pq_ci <- lm_output %>%
-  select(imagery, rts_class, variable, contrasts_pq_ci) %>%
-  unnest(cols = c(contrasts_pq_ci)) %>%
+zonal_stats_contrasts <- lm_output %>%
+  select(imagery, rts_class, variable, contrasts_pq) %>%
+  unnest(cols = c(contrasts_pq)) %>%
   filter(p_value <= 0.1) %>%
   separate_wider_delim(contrast, 
                        delim = ' - ', 
@@ -2485,12 +2176,16 @@ zonal_stats_contrasts_pq_ci <- lm_output %>%
 ```{r}
 # calculate figure y-limits by hand
 # (1.5*IQR is the upper and lower whisker limit; 1.05 is the default axis expansion by ggplot)
-zonal_stats_limits_pq_ci <- zonal_stats %>%
+zonal_stats_limits <- zonal_stats %>%
   select(imagery:sr_sd, pq_ci) %>%
   pivot_longer(r_mean:sr_sd,  names_to = 'variable', values_to = 'value') %>%
 group_by(imagery, pq_ci, rts_class, variable) %>%
-  summarise(lwr = min(trim_outliers(value), na.rm = TRUE),
-            upr = max(trim_outliers(value), na.rm = TRUE)) %>%
+  summarise(
+    # lwr = min(trim_outliers(value), na.rm = TRUE), # use this if removing outliers from plots
+    # upr = max(trim_outliers(value), na.rm = TRUE),
+    lwr = min(value, na.rm = TRUE),
+    upr = max(value, na.rm = TRUE)
+    ) %>%
   mutate(lim_lwr = upr - (upr - lwr)*1.05,
          lim_upr = lwr + (upr - lwr)*1.05) %>%
   group_by(variable, rts_class) %>%
@@ -2499,18 +2194,18 @@ group_by(imagery, pq_ci, rts_class, variable) %>%
 ```
 
 ```{r}
-zonal_stats_contrasts_pq_ci <- zonal_stats_contrasts_pq_ci %>%
-  left_join(zonal_stats_limits_pq_ci, by = c('variable', 'rts_class')) %>%
+zonal_stats_contrasts <- zonal_stats_contrasts %>%
+  left_join(zonal_stats_limits, by = c('variable', 'rts_class')) %>%
   group_by(imagery, rts_class, variable) %>%
   mutate(n = n(),
-         y = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.15,
-                       TRUE ~ upr),
-         upr = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.25,
-                         TRUE ~ lwr + (upr - lwr)*1.1))
+         y = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.2,
+                       TRUE ~ lwr + (upr - lwr)*1.05),
+         upr = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.3,
+                         TRUE ~ lwr + (upr - lwr)*1.15))
 
 # add new upr limits back to limits tibble
-zonal_stats_limits_pq_ci <- zonal_stats_limits_pq_ci %>%
-  left_join(zonal_stats_contrasts_pq_ci %>%
+zonal_stats_limits <- zonal_stats_limits %>%
+  left_join(zonal_stats_contrasts %>%
               select(imagery, rts_class, variable, upr) %>%
               group_by(rts_class, variable) %>%
               summarise(new_upr = max(upr)),
@@ -2521,59 +2216,6 @@ zonal_stats_limits_pq_ci <- zonal_stats_limits_pq_ci %>%
 
 ```
 
-```{r}
-zonal_stats_contrasts_pq_ci_size <- lm_output %>%
-  select(imagery, rts_class, variable, contrasts_pq_ci_size) %>%
-  unnest(cols = c(contrasts_pq_ci_size)) %>%
-  filter(p_value <= 0.1) %>%
-  separate_wider_delim(contrast, 
-                       delim = ' - ', 
-                       names = c('x_min', 'x_max'), 
-                       cols_remove = FALSE) %>%
-  mutate(x_min = as.numeric(factor(x_min,
-                                   levels = pq_labels)) + 0.05,
-         x_max = as.numeric(factor(x_max,
-                                   levels = pq_labels)) - 0.05)
-```
-
-```{r}
-# calculate figure y-limits by hand
-# (1.5*IQR is the upper and lower whisker limit; 1.05 is the default axis expansion by ggplot)
-zonal_stats_limits_pq_ci_size <- zonal_stats %>%
-  select(imagery:sr_sd, pq_ci_size) %>%
-  pivot_longer(r_mean:sr_sd,  names_to = 'variable', values_to = 'value') %>%
-group_by(imagery, pq_ci_size, rts_class, variable) %>%
-  summarise(lwr = min(trim_outliers(value), na.rm = TRUE),
-            upr = max(trim_outliers(value), na.rm = TRUE)) %>%
-  mutate(lim_lwr = upr - (upr - lwr)*1.05,
-         lim_upr = lwr + (upr - lwr)*1.05) %>%
-  group_by(variable, rts_class) %>%
-  summarise(lwr = min(lim_lwr),
-            upr = max(lim_upr))
-```
-
-```{r}
-zonal_stats_contrasts_pq_ci_size <- zonal_stats_contrasts_pq_ci_size %>%
-  left_join(zonal_stats_limits_pq_ci_size, by = c('variable', 'rts_class')) %>%
-  group_by(imagery, rts_class, variable) %>%
-  mutate(n = n(),
-         y = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.15,
-                       TRUE ~ upr),
-         upr = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.25,
-                         TRUE ~ lwr + (upr - lwr)*1.1))
-
-# add new upr limits back to limits tibble
-zonal_stats_limits_pq_ci_size <- zonal_stats_limits_pq_ci_size %>%
-  left_join(zonal_stats_contrasts_pq_ci_size %>%
-              select(imagery, rts_class, variable, upr) %>%
-              group_by(rts_class, variable) %>%
-              summarise(new_upr = max(upr)),
-            by = c('rts_class', 'variable')) %>%
-  mutate(upr = case_when(!is.na(new_upr) ~ new_upr,
-                         TRUE ~ upr)) %>%
-  select(-new_upr)
-
-```
 
 These plots summarize the input data values (mean or standard deviation) in RTS cells, background cells, and the normalized difference between the two (`Delta = RTS - Background`). Most of the input layer names should be self explanatory, but for the others:
 
@@ -2585,90 +2227,60 @@ sr = shaded relief
 variables <- colnames(zonal_stats %>%
                         ungroup() %>%
                         select(r_mean:sr_sd))
-zonal_stats_figs_pq_ci <- map(
+zonal_stats_figs <- map(
   variables,
   ~ plot_zonal_stats(
     x_var = 'pq_ci',
     y_var = .x, 
-    contrasts = zonal_stats_contrasts_pq_ci,
-    limits = zonal_stats_limits_pq_ci)
+    contrasts = zonal_stats_contrasts,
+    limits = zonal_stats_limits)
 )
-names(zonal_stats_figs_pq_ci) <- variables
-
-zonal_stats_figs_pq_ci_size <- map(
-  variables,
-  ~ plot_zonal_stats(
-    x = 'pq_ci_size',
-    y = .x, 
-    contrasts = zonal_stats_contrasts_pq_ci_size,
-    limits = zonal_stats_limits_pq_ci_size)
-)
-names(zonal_stats_figs_pq_ci_size) <- variables
+names(zonal_stats_figs) <- variables
 ```
 
 A few takeaway points:
 
-- Brighter RTS against a darker background are predicted better. Maxar: poorly predicted RTS may tend to be underexposed (whole image is dark). Planet: poorly predicted RTS may tend to be overexposed (whole image is bright). Possible this is related to seasonality?
+- Brighter RTS against a darker background are predicted better. Doesn't seem to be related to seasonality.
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs_pq_ci[['r_mean']]
-zonal_stats_figs_pq_ci_size[['r_mean']]
-zonal_stats_figs_pq_ci[['g_mean']]
-zonal_stats_figs_pq_ci_size[['g_mean']]
-zonal_stats_figs_pq_ci[['b_mean']]
-zonal_stats_figs_pq_ci_size[['b_mean']]
-zonal_stats_figs_pq_ci[['lum_mean']]
-zonal_stats_figs_pq_ci_size[['lum_mean']]
-zonal_stats_figs_pq_ci[['nir_mean']]
-zonal_stats_figs_pq_ci_size[['nir_mean']]
+zonal_stats_figs[['r_mean']]
+zonal_stats_figs[['g_mean']]
+zonal_stats_figs[['b_mean']]
+zonal_stats_figs[['lum_mean']]
 ```
 
 -   Well predicted RTS tend to have more consistent NDWI relative to the surrounding landscape, while poorly predicted RTS tend to have less difference in the variability of NDWI between RTS and background pixels.
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs_pq_ci[['ndwi_sd']]
-zonal_stats_figs_pq_ci_size[['ndwi_sd']]
+zonal_stats_figs[['ndwi_sd']]
 ```
 
--   NDVI (mean) figures indicate that RTS may be predicted poorly where background cells have low NDVI/plant growth. I.e. it's harder for the model to find the RTS where there's not much plant growth across the landscape (or if it's early/late season imagery?). Also important to note is that NDVI is coming from Sentinel-2, so is at lower resolution than than the RGB imagery. This could be introducing errors leading to non-significant relationships.
-
-- RTS are also predicted better where the background has variable plant growth and the RTS feature has spatially consistent plant growth.
+- RTS are predicted better where the background has variable plant growth and the RTS feature has spatially consistent plant growth (Planet and Sentinel-2 models).
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs_pq_ci[['ndvi_mean']]
-zonal_stats_figs_pq_ci_size[['ndvi_mean']]
-zonal_stats_figs_pq_ci[['ndvi_sd']]
-zonal_stats_figs_pq_ci_size[['ndvi_sd']]
+zonal_stats_figs[['ndvi_sd']]
 ```
 
--   The standard deviation of elevation (surface roughness) figure indicates that the Maxar model struggles to identify RTS where the landscape has high surface roughness. There is also a slight trend that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily in the Planet and Sentinel models. I.e. smooth landscape with uneven RTS is easy for the model to find.
+-   The standard deviation of elevation (surface roughness) figure indicates that the Maxar model struggles to identify RTS where RTS (and, perhaps, the landscape) has high surface roughness. There is also a slight trend that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily in the Planet and Sentinel models. I.e. smooth landscape with uneven RTS is easy for the model to find.
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs_pq_ci[['elev_sd']]
-zonal_stats_figs_pq_ci_size[['elev_sd']]
+zonal_stats_figs[['elev_sd']]
 ```
 
 I didn't find much interesting about the rest of these figures, but they are included  here for completeness:
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs_pq_ci[['ndwi_mean']]
-zonal_stats_figs_pq_ci_size[['ndwi_mean']]
-zonal_stats_figs_pq_ci[['elev_mean']]
-zonal_stats_figs_pq_ci_size[['elev_mean']]
-zonal_stats_figs_pq_ci[['sr_mean']]
-zonal_stats_figs_pq_ci_size[['sr_mean']]
-zonal_stats_figs_pq_ci[['r_sd']]
-zonal_stats_figs_pq_ci_size[['r_sd']]
-zonal_stats_figs_pq_ci[['g_sd']]
-zonal_stats_figs_pq_ci_size[['g_sd']]
-zonal_stats_figs_pq_ci[['b_sd']]
-zonal_stats_figs_pq_ci_size[['b_sd']]
-zonal_stats_figs_pq_ci[['lum_sd']]
-zonal_stats_figs_pq_ci_size[['lum_sd']]
-zonal_stats_figs_pq_ci[['nir_sd']]
-zonal_stats_figs_pq_ci_size[['nir_sd']]
-zonal_stats_figs_pq_ci[['sr_sd']]
-zonal_stats_figs_pq_ci_size[['sr_sd']]
+zonal_stats_figs[['nir_mean']]
+zonal_stats_figs[['ndvi_mean']]
+zonal_stats_figs[['ndwi_mean']]
+zonal_stats_figs[['elev_mean']]
+zonal_stats_figs[['sr_mean']]
+zonal_stats_figs[['r_sd']]
+zonal_stats_figs[['g_sd']]
+zonal_stats_figs[['b_sd']]
+zonal_stats_figs[['lum_sd']]
+zonal_stats_figs[['nir_sd']]
+zonal_stats_figs[['sr_sd']]
 ```
 
 ### Prediction Probability
@@ -2746,7 +2358,7 @@ ggplot(input_data %>%
   scale_x_continuous(name = 'NIR') +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
-  facet_grid(rts_class ~ pq_ci_size) +
+  facet_grid(rts_class ~ pq_ci) +
   theme_bw() +
   ggtitle('Maxar')
 
@@ -2762,7 +2374,7 @@ ggplot(input_data %>%
   scale_x_continuous(name = 'NIR') +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
-  facet_grid(rts_class ~ pq_ci_size) +
+  facet_grid(rts_class ~ pq_ci) +
   theme_bw() +
   ggtitle('Planet')
 
@@ -2778,7 +2390,7 @@ ggplot(input_data %>%
   scale_x_continuous(name = 'NIR') +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
-  facet_grid(rts_class ~ pq_ci_size) +
+  facet_grid(rts_class ~ pq_ci) +
   theme_bw() +
   ggtitle('Sentinel-2')
 
@@ -2794,7 +2406,7 @@ ggplot(input_data %>%
   scale_x_continuous(name = 'NDVI') +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
-  facet_grid(rts_class ~ pq_ci_size) +
+  facet_grid(rts_class ~ pq_ci) +
   theme_bw() +
   ggtitle('Maxar')
 
@@ -2810,7 +2422,7 @@ ggplot(input_data %>%
   scale_x_continuous(name = 'NDVI') +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
-  facet_grid(rts_class ~ pq_ci_size) +
+  facet_grid(rts_class ~ pq_ci) +
   theme_bw() +
   ggtitle('Planet')
 
@@ -2826,7 +2438,7 @@ ggplot(input_data %>%
   scale_x_continuous(name = 'NDVI') +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
-  facet_grid(rts_class ~ pq_ci_size) +
+  facet_grid(rts_class ~ pq_ci) +
   theme_bw() +
   ggtitle('Sentinel-2')
 ```
@@ -2967,7 +2579,7 @@ PCA - Prediction quality color scheme
 ```{r}
 plot_ly(zonal_stats_class, 
         x = ~PC1, y = ~PC2, z = ~PC3, 
-        color = ~pq_ci_size,
+        color = ~pq_ci,
         colors = pq_colors,
         symbol = ~rts_class,
         symbols = c('circle', 'circle-open'),
@@ -2978,62 +2590,45 @@ plot_ly(zonal_stats_class,
                       zaxis = list(title = 'PC3')))
 ```
 
-```{r}
-autoplot(zonal_stats_pca, 
-         data = zonal_stats_class, 
-         x = 1,
-         y = 2,
-         color = 'pq_ci_size',
-         shape = 'rts_class', 
-         loadings = TRUE, loadings.colour = 'black',
-         loadings.label = TRUE, loadings.label.size = 4,
-         loadings.label.colour = 'black') +
-  scale_color_manual(name = 'Prediction Quality', 
-                     labels = pq_labels,
-                     values = pq_colors) +
-  scale_shape_manual(name = 'RTS Class',
-                     labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+Maxar
 
-autoplot(zonal_stats_pca, 
-         data = zonal_stats_class, 
-         x = 1,
-         y = 3,
-         color = 'pq_ci_size',
-         shape = 'rts_class', 
-         loadings = TRUE, loadings.colour = 'black',
-         loadings.label = TRUE, loadings.label.size = 4,
-         loadings.label.colour = 'black') +
-  scale_color_manual(name = 'Prediction Quality', 
-                     labels = pq_labels,
-                     values = pq_colors) +
-  scale_shape_manual(name = 'RTS Class',
-                     labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
-autoplot(zonal_stats_pca, 
-         data = zonal_stats_class, 
-         x = 2,
-         y = 3,
-         color = 'pq_ci_size',
-         shape = 'rts_class', 
-         loadings = TRUE, loadings.colour = 'black',
-         loadings.label = TRUE, loadings.label.size = 4,
-         loadings.label.colour = 'black') +
-  scale_color_manual(name = 'Prediction Quality', 
-                     labels = pq_labels,
-                     values = pq_colors) +
-  scale_shape_manual(name = 'RTS Class',
-                     labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+```{r}
+plot_ly(zonal_stats_class %>%
+          filter(imagery == 'Maxar'), 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~pq_ci,
+        colors = pq_colors,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
 ```
 
-Prediction Quality (without size)
+Planet
 
 ```{r}
-plot_ly(zonal_stats_class, 
+plot_ly(zonal_stats_class %>%
+          filter(imagery == 'Planet'), 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~pq_ci,
+        colors = pq_colors,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
+
+Sentinel-2
+
+```{r}
+plot_ly(zonal_stats_class %>%
+          filter(imagery == 'Sentinel-2'), 
         x = ~PC1, y = ~PC2, z = ~PC3, 
         color = ~pq_ci,
         colors = pq_colors,
@@ -3102,6 +2697,54 @@ PCA - RTS probability color scheme
 
 ```{r}
 plot_ly(zonal_stats_class, 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~prediction_mean_rts,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
+
+Maxar
+
+```{r}
+plot_ly(zonal_stats_class %>%
+          filter(imagery == 'Maxar'), 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~prediction_mean_rts,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
+
+Planet
+
+```{r}
+plot_ly(zonal_stats_class %>%
+          filter(imagery == 'Planet'), 
+        x = ~PC1, y = ~PC2, z = ~PC3, 
+        color = ~prediction_mean_rts,
+        symbol = ~rts_class,
+        symbols = c('circle', 'circle-open'),
+        size = 1) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                      yaxis = list(title = 'PC2'),
+                      zaxis = list(title = 'PC3')))
+```
+
+Sentinel-2
+
+```{r}
+plot_ly(zonal_stats_class %>%
+          filter(imagery == 'Sentinel-2'), 
         x = ~PC1, y = ~PC2, z = ~PC3, 
         color = ~prediction_mean_rts,
         symbol = ~rts_class,
@@ -3329,7 +2972,7 @@ m <- lm(rts_iou ~ rts_area_log10 * rts_shape,
         data = polys %>%
           filter(imagery == 'Planet'))
 planet_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
-# the r2 is about the same for Planet with rts_iou ~ rts_area_log10
+# the r2 and AIC are about the same for Planet with rts_iou ~ rts_area_log10
 # or rts_iou ~ rts_area_log10 * rts_shape
 # to allow comparison of the imagery types, I will stick with the more complex
 # model that was chosen as the best for both Maxar and Sentinel-2
@@ -3371,3 +3014,327 @@ zonal_stats_class %>%
 ggplot(aes(x = ndwi_mean, y = rts_area, color = region)) +
   geom_point()
 ```
+
+All models are tripped up by the Yamal/Gydan Region.
+
+```{r}
+ggplot(polys,
+       aes(x = yg, fill = pq_ci)) +
+  geom_bar(position = 'fill') +
+  scale_x_discrete(name = 'Region') +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(name = 'Prediction Quality',
+                    values = pq_colors) +
+  facet_grid(. ~ imagery) +
+  theme_bw() +
+  theme(axis.title.y = element_blank())
+```
+
+```{r, fig.height = 3, fig.width = 7}
+ggplot(polys,
+       aes(x = rts_area, y = rts_iou, shape = region, color = pq_ci)) +
+  geom_point() +
+  scale_x_log10(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'RTS IoU') +
+  scale_shape_manual(name = 'Region',
+                     values = c(1, 16)) +
+  scale_color_manual(name = 'Prediction Quality',
+                     values = pq_colors) +
+  facet_grid(. ~ imagery) +
+  theme_bw()
+```
+
+
+## Plot Features
+
+Visualize the RTS predictions
+
+```{r fig.width = 12, fig.height = 4.8}
+walk(pred_ids,
+    ~ plot_prediction(.x))
+```
+
+Maxar High Quality Predictions
+
+```{r}
+# get polygon data
+current_data <- polys %>%
+  filter(pq_ci == 'High' & imagery == 'Maxar') %>%
+  select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
+         pred_geometry)
+
+# prep RGB data
+current_rgb <- input_data %>%
+  filter(pq_ci == 'High' & imagery == 'Maxar') %>%
+  full_join(current_data %>%
+              select(id, imagery, rts_iou),
+            by = c('imagery', 'id'))
+
+plots <- map(
+  unique(as.character(current_data$id)),
+  ~ ggplot(data = current_data %>%
+             filter(id == .x)) +
+    geom_raster(data = current_rgb %>%
+                  filter(id == .x),
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    geom_sf(aes(geometry = bbox_geometry),
+            color = 'black',
+            fill = 'transparent') +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    geom_sf(aes(geometry = pred_geometry,
+                color = 'Prediction'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = '',
+                       values = c(pq_colors[1], 'gray90')) +
+    theme_bw() +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()))
+plots
+```
+
+Maxar Low Quality Predictions
+
+```{r}
+# get polygon data
+current_data <- polys %>%
+  filter(pq_ci == 'Low' & imagery == 'Maxar') %>%
+  select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
+         pred_geometry)
+
+# prep RGB data
+current_rgb <- input_data %>%
+  filter(pq_ci == 'Low' & imagery == 'Maxar') %>%
+  full_join(current_data %>%
+              select(id, imagery, rts_iou),
+            by = c('imagery', 'id'))
+
+plots <- map(
+  unique(as.character(current_data$id)),
+  ~ ggplot(data = current_data %>%
+             filter(id == .x)) +
+    geom_raster(data = current_rgb %>%
+                  filter(id == .x),
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    geom_sf(aes(geometry = bbox_geometry),
+            color = 'black',
+            fill = 'transparent') +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    geom_sf(aes(geometry = pred_geometry,
+                color = 'Prediction'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = '',
+                       values = c(pq_colors[3], 'gray90')) +
+    theme_bw() +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()))
+plots
+```
+
+Planet High Quality Predictions
+
+```{r}
+# get polygon data
+current_data <- polys %>%
+  filter(pq_ci == 'High' & imagery == 'Planet') %>%
+  select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
+         pred_geometry)
+
+# prep RGB data
+current_rgb <- input_data %>%
+  filter(pq_ci == 'High' & imagery == 'Planet') %>%
+  full_join(current_data %>%
+              select(id, imagery, rts_iou),
+            by = c('imagery', 'id'))
+
+plots <- map(
+  unique(as.character(current_data$id)),
+  ~ ggplot(data = current_data %>%
+             filter(id == .x)) +
+    geom_raster(data = current_rgb %>%
+                  filter(id == .x),
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    geom_sf(aes(geometry = bbox_geometry),
+            color = 'black',
+            fill = 'transparent') +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    geom_sf(aes(geometry = pred_geometry,
+                color = 'Prediction'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = '',
+                       values = c(pq_colors[1], 'gray90')) +
+    theme_bw() +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()))
+plots
+```
+
+Planet Low Quality Predictions
+
+These images seem like they may be blurrier than the well predicted Planet RTS features.
+
+```{r}
+# get polygon data
+current_data <- polys %>%
+  filter(pq_ci == 'Low' & imagery == 'Planet') %>%
+  select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
+         pred_geometry)
+
+# prep RGB data
+current_rgb <- input_data %>%
+  filter(pq_ci == 'Low' & imagery == 'Planet') %>%
+  full_join(current_data %>%
+              select(id, imagery, rts_iou),
+            by = c('imagery', 'id'))
+
+plots <- map(
+  unique(as.character(current_data$id)),
+  ~ ggplot(data = current_data %>%
+             filter(id == .x)) +
+    geom_raster(data = current_rgb %>%
+                  filter(id == .x),
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    geom_sf(aes(geometry = bbox_geometry),
+            color = 'black',
+            fill = 'transparent') +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    geom_sf(aes(geometry = pred_geometry,
+                color = 'Prediction'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = '',
+                       values = c(pq_colors[3], 'gray90')) +
+    theme_bw() +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()))
+plots
+```
+
+Sentinel High Quality Predictions
+
+```{r}
+# get polygon data
+current_data <- polys %>%
+  filter(pq_ci == 'High' & imagery == 'Sentinel-2') %>%
+  select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
+         pred_geometry)
+
+# prep RGB data
+current_rgb <- input_data %>%
+  filter(pq_ci == 'High' & imagery == 'Sentinel-2') %>%
+  full_join(current_data %>%
+              select(id, imagery, rts_iou),
+            by = c('imagery', 'id'))
+
+plots <- map(
+  unique(as.character(current_data$id)),
+  ~ ggplot(data = current_data %>%
+             filter(id == .x)) +
+    geom_raster(data = current_rgb %>%
+                  filter(id == .x),
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    geom_sf(aes(geometry = bbox_geometry),
+            color = 'black',
+            fill = 'transparent') +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    geom_sf(aes(geometry = pred_geometry,
+                color = 'Prediction'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = '',
+                       values = c(pq_colors[1], 'gray90')) +
+    theme_bw() +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()))
+plots
+```
+
+Sentinel Low Quality Predictions
+
+```{r}
+# get polygon data
+current_data <- polys %>%
+  filter(pq_ci == 'Low' & imagery == 'Sentinel-2') %>%
+  select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
+         pred_geometry)
+
+# prep RGB data
+current_rgb <- input_data %>%
+  filter(pq_ci == 'Low' & imagery == 'Sentinel-2') %>%
+  full_join(current_data %>%
+              select(id, imagery, rts_iou),
+            by = c('imagery', 'id'))
+
+plots <- map(
+  unique(as.character(current_data$id)),
+  ~ ggplot(data = current_data %>%
+             filter(id == .x)) +
+    geom_raster(data = current_rgb %>%
+                  filter(id == .x),
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    geom_sf(aes(geometry = bbox_geometry),
+            color = 'black',
+            fill = 'transparent') +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    geom_sf(aes(geometry = pred_geometry,
+                color = 'Prediction'),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = '',
+                       values = c(pq_colors[3], 'gray90')) +
+    theme_bw() +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()))
+plots
+```
+
