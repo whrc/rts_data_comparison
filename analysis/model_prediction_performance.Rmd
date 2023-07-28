@@ -8,7 +8,9 @@ output:
 
 ## TODO:
 
--   some sort of figure and/or decision tree for how other researchers can choose what resolution/imagery quality is necessary for their analysis.
+-   Case study of RTS features that had different prediction qualities across all 3 models.
+-   Can a random forest model (or some other analysis) predict prediction quality?
+-   Add stats to prediction quality by region figure. Somehow include size in this analysis.
 -   Start picking figures to include in manuscript!
 -   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
 
@@ -41,6 +43,7 @@ library(ggsignif)
 library(ggfortify)
 library(plotly)
 library(tidyverse)
+theme_set(theme_bw())
 ```
 
 ## Prep Google Drive Authentication
@@ -417,7 +420,6 @@ plot_prediction <- function(pid) {
                          values = pq_colors,
                          drop = FALSE) +
       facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('RTS IoU:', round(rts_iou, 2))) +
-      theme_bw() +
       theme(axis.title = element_blank(),
             axis.text = element_blank(),
             axis.ticks = element_blank())
@@ -450,7 +452,6 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
-    theme_bw() +
     theme(axis.title.x = element_blank()) +
     coord_cartesian(ylim = limits %>%
                       filter(variable == y_var & rts_class == 'RTS') %>%
@@ -476,7 +477,6 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
-    theme_bw() +
     theme(axis.title.x = element_blank()) +
     coord_cartesian(ylim = limits %>%
                       filter(variable == y_var & rts_class == 'Delta') %>%
@@ -502,7 +502,6 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
-    theme_bw() +
     theme(axis.title.x = element_blank()) +
     coord_cartesian(ylim = limits %>%
                       filter(variable == y_var & rts_class == 'Background') %>%
@@ -1268,7 +1267,6 @@ ggplot(polys,
   scale_y_continuous(name = 'Count') +
   scale_fill_manual(values = imagery_colors) +
   facet_grid(imagery ~ .) +
-  theme_bw() +
   theme(legend.title = element_blank())
 
 knitr::kable(imagery_performance_summary)
@@ -1400,7 +1398,6 @@ rec_pre_plot <- ggplot(rec_pre,
   coord_fixed(xlim = c(0, 1),
                   ylim = c(0, 1),
                   clip = 'off') +
-  theme_bw() +
   theme(legend.title = element_blank(),
         plot.margin = margin(t = 5.5, r = 5.5, b = 30, l = 30, unit = 'pt'))
 rec_pre_plot
@@ -1469,7 +1466,6 @@ ggplot(polys, aes(x = rts_area, fill = yg)) +
   scale_fill_manual(values = c('gray50', 'gray20')) +
   scale_x_log10(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'Count') +
-  theme_bw() +
   theme(legend.title = element_blank())
 ```
 
@@ -1724,7 +1720,6 @@ ggplot(polys, aes(x = rts_area, y = mean_iou, color = imagery)) +
                      limits = c(0, 0.93)) +
   scale_color_manual(values = imagery_colors,
                      labels = imagery_labels) +
-  theme_bw() +
   theme(legend.title = element_blank())
 
 ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
@@ -1740,7 +1735,6 @@ ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
   scale_y_continuous(name = 'RTS IoU') +
   scale_color_manual(values = imagery_colors,
                      labels = imagery_labels) +
-  theme_bw() +
   theme(legend.title = element_blank())
 
 ```
@@ -1809,7 +1803,6 @@ ggplot(polys,
              strip.position = 'bottom', 
              scales = 'free_x',
              labeller = labeller(imagery = imagery_labeller)) +
-  theme_bw() +
   theme(axis.title.x = element_blank(),
         legend.title = element_blank(),
         panel.spacing = unit(0, "lines"), 
@@ -1969,7 +1962,6 @@ ggplot(polys,
                      values = imagery_colors) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'RTS IoU') +
-  theme_bw() +
   # coord_cartesian(ylim = c(0, 1)) +
   facet_grid(. ~ imagery)
 ```
@@ -1999,7 +1991,6 @@ ggplot(polys,
                      values = imagery_colors) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'RTS IoU') +
-  theme_bw() +
   # coord_cartesian(ylim = c(0, 1)) +
   facet_grid(. ~ imagery)
 ```
@@ -2085,7 +2076,6 @@ ggplot(polys,
   scale_x_discrete(name = 'RTS Features') +
   scale_color_manual(values = imagery_colors) +
   # facet_grid(name_long ~ ., scales = 'free_y') +
-  theme_bw() +
   theme(axis.text.x = element_blank(),
         legend.title = element_blank(),
         panel.grid.minor = element_blank()) +
@@ -2306,8 +2296,7 @@ ggplot(input_data, aes(x = nir, y = prediction)) +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ imagery,
-             labeller = rts_labeller) +
-  theme_bw()
+             labeller = rts_labeller)
 
 ggplot(input_data, aes(x = ndvi, y = prediction)) +
   geom_bin_2d() +
@@ -2341,8 +2330,7 @@ ggplot(input_data, aes(x = ndvi, y = prediction)) +
   #                     guide = guide_legend(order = 2)) +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ imagery,
-             labeller = rts_labeller) +
-  theme_bw()
+             labeller = rts_labeller)
 ```
 
 ```{r}
@@ -2359,7 +2347,6 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  theme_bw() +
   ggtitle('Maxar')
 
 ggplot(input_data %>%
@@ -2375,7 +2362,6 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  theme_bw() +
   ggtitle('Planet')
 
 ggplot(input_data %>%
@@ -2391,7 +2377,6 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  theme_bw() +
   ggtitle('Sentinel-2')
 
 ggplot(input_data %>%
@@ -2407,7 +2392,6 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  theme_bw() +
   ggtitle('Maxar')
 
 ggplot(input_data %>%
@@ -2423,7 +2407,6 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  theme_bw() +
   ggtitle('Planet')
 
 ggplot(input_data %>%
@@ -2439,7 +2422,6 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  theme_bw() +
   ggtitle('Sentinel-2')
 ```
 
@@ -2457,8 +2439,7 @@ ggplot(input_data, aes(x = ndwi, y = prediction)) +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ imagery,
-             labeller = rts_labeller) +
-  theme_bw()
+             labeller = rts_labeller)
 ```
 
 Elevation
@@ -2475,8 +2456,7 @@ ggplot(input_data, aes(x = elev, y = prediction)) +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ imagery,
-             labeller = rts_labeller) +
-  theme_bw()
+             labeller = rts_labeller)
 ```
 
 Others
@@ -2493,8 +2473,7 @@ ggplot(input_data, aes(x = r, y = prediction)) +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ imagery,
-             labeller = rts_labeller) +
-  theme_bw()
+             labeller = rts_labeller)
 
 ggplot(input_data, aes(x = g, y = prediction)) +
   geom_bin_2d() +
@@ -2507,8 +2486,7 @@ ggplot(input_data, aes(x = g, y = prediction)) +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ imagery,
-             labeller = rts_labeller) +
-  theme_bw()
+             labeller = rts_labeller)
 
 ggplot(input_data, aes(x = b, y = prediction)) +
   geom_bin_2d() +
@@ -2521,8 +2499,7 @@ ggplot(input_data, aes(x = b, y = prediction)) +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ imagery,
-             labeller = rts_labeller) +
-  theme_bw()
+             labeller = rts_labeller)
 
 ggplot(input_data, aes(x = sr, y = prediction)) +
   geom_bin_2d() +
@@ -2535,8 +2512,7 @@ ggplot(input_data, aes(x = sr, y = prediction)) +
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ imagery,
-             labeller = rts_labeller) +
-  theme_bw()
+             labeller = rts_labeller)
 ```
 
 ### PCA Analysis
@@ -2656,8 +2632,7 @@ autoplot(zonal_stats_pca,
                      values = pq_colors) +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
@@ -2673,8 +2648,7 @@ autoplot(zonal_stats_pca,
                      values = pq_colors) +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
          x = 2,
@@ -2689,8 +2663,7 @@ autoplot(zonal_stats_pca,
                      values = pq_colors) +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 ```
 
 PCA - RTS probability color scheme
@@ -2769,8 +2742,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'Mean RTS Probability') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
@@ -2784,8 +2756,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'Mean RTS Probability') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
@@ -2799,8 +2770,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'Mean RTS Probability') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 ```
 
 PCA - IoU color scheme
@@ -2831,8 +2801,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'IoU') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
@@ -2846,8 +2815,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'IoU') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
@@ -2861,8 +2829,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'IoU') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 ```
 
 PCA - RTS area color scheme
@@ -2893,8 +2860,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'RTS Area') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
@@ -2908,8 +2874,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'RTS Area') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 
 autoplot(zonal_stats_pca, 
          data = zonal_stats_class, 
@@ -2923,8 +2888,7 @@ autoplot(zonal_stats_pca,
   scale_color_viridis(name = 'RTS Area') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2)) +
-  theme_bw()
+                     values = c(16, 1, 2))
 ```
 
 
@@ -2937,8 +2901,7 @@ ggplot(polys,
   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
   scale_y_log10(name = expression('RTS Area (m'^2 * ')')) +
   scale_color_viridis(name = 'RTS IoU') +
-  facet_grid(. ~ imagery) +
-  theme_bw()
+  facet_grid(. ~ imagery)
 
 # ggplot(polys,
 #        aes(x = rts_shape, y = rts_area, color = rts_iou)) +
@@ -2946,8 +2909,7 @@ ggplot(polys,
 #   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
 #   scale_y_log10(name = expression('RTS Area (m'^2 * ')')) +
 #   scale_color_viridis(name = 'RTS IoU') +
-#   facet_grid(pq_ci ~ imagery) +
-#   theme_bw()
+#   facet_grid(pq_ci ~ imagery)
 # 
 # ggplot(polys,
 #        aes(x = rts_shape, y = rts_area, color = rts_iou)) +
@@ -2955,8 +2917,7 @@ ggplot(polys,
 #   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
 #   scale_y_log10(name = expression('RTS Area (m'^2 * ')')) +
 #   scale_color_viridis(name = 'RTS IoU') +
-#   facet_grid(pq_ci_size ~ imagery) +
-#   theme_bw()
+#   facet_grid(pq_ci_size ~ imagery)
 
 polys <- polys %>%
   mutate(rts_area_log10 = log10(rts_area))
@@ -3026,7 +2987,6 @@ ggplot(polys,
   scale_fill_manual(name = 'Prediction Quality',
                     values = pq_colors) +
   facet_grid(. ~ imagery) +
-  theme_bw() +
   theme(axis.title.y = element_blank())
 ```
 
@@ -3040,8 +3000,122 @@ ggplot(polys,
                      values = c(1, 16)) +
   scale_color_manual(name = 'Prediction Quality',
                      values = pq_colors) +
-  facet_grid(. ~ imagery) +
-  theme_bw()
+  facet_grid(. ~ imagery)
+```
+
+
+## Case Studies
+
+The one really large RTS that was poorly predicted in Planet and Sentinel models:
+
+-   May be that the RTS being so big is causing issues with the model (missing edges in the imagery)
+-   I'm not sure if this is impacting the prediction, but the tile for Sentinel is pretty different and includes a bunch of open water that's not in either of the other images.
+-   The RTS features seem to be brighter relative to the background in the poorly predicted ones, which is backwards from the conclusions of the zonal stats analysis.
+
+```{r}
+rts_id <- polys %>%
+  as_tibble() %>%
+  filter(rts_area > size_threshold & pq_ci == 'Low') %>%
+  select(id) %>%
+  mutate(id = as.character(id)) %>%
+  pull(id) %>%
+  unique()
+
+ggplot(data = polys %>%
+         filter(id == rts_id)) +
+  geom_raster(data = input_data %>%
+                filter(id == rts_id),
+              aes(x = x, y = y, fill = color_hex),
+              inherit.aes = FALSE) +
+  scale_fill_manual(breaks = levels(input_data$color_hex),
+                    values = levels(input_data$color_hex),
+                    guide = 'none') +
+  geom_sf(aes(geometry = val_geometry,
+              color = 'Validation'),
+          fill = 'transparent',
+          linewidth = 0.5) +
+  scale_color_manual(values = c('gray90')) +
+new_scale('color') +
+  geom_sf(aes(geometry = pred_geometry,
+              color = pq_ci),
+          fill = 'transparent',
+          linewidth = 0.5) +
+  scale_color_manual(name = '',
+                     values = pq_colors[2:3]) +
+  facet_grid(imagery ~ .) +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+ggplot(zonal_stats %>%
+         filter(rts_area > 35000),
+       aes(x = imagery, y = lum_mean, color = pq_ci)) +
+  geom_point() +
+  scale_color_manual(name = 'Prediction Quality',
+                     values = pq_colors) +
+  # scale_shape_manual(values = c(16, 2, 1)) +
+  facet_grid(rts_class ~ .)
+```
+
+The RTS features which had different prediction qualities across all three models:
+
+```{r}
+polys <- polys %>%
+  as_tibble() %>%
+  group_by(id) %>%
+  mutate(pq_n_unique = length(unique(pq_ci)))
+
+rts_ids <- polys %>%
+  filter(pq_n_unique == 3) %>%
+  mutate(id = as.character(id)) %>%
+  pull(id) %>%
+  unique()
+```
+
+```{r}
+for (rts_id in rts_ids) {
+  print(
+    ggplot(data = polys %>%
+             filter(id == rts_id)) +
+      geom_raster(data = input_data %>%
+                    filter(id == rts_id),
+                  aes(x = x, y = y, fill = color_hex),
+                  inherit.aes = FALSE) +
+      scale_fill_manual(breaks = levels(input_data$color_hex),
+                        values = levels(input_data$color_hex),
+                        guide = 'none') +
+      geom_sf(aes(geometry = val_geometry,
+                  color = 'Validation'),
+              fill = 'transparent',
+              linewidth = 0.5) +
+      scale_color_manual(values = c('gray90')) +
+      new_scale('color') +
+      geom_sf(aes(geometry = pred_geometry,
+                  color = pq_ci),
+              fill = 'transparent',
+              linewidth = 0.5) +
+      scale_color_manual(name = '',
+                         values = pq_colors) +
+      facet_grid(imagery ~ .) +
+      theme(axis.title = element_blank(),
+            axis.text = element_blank(),
+            axis.ticks = element_blank())
+  )
+  
+}
+```
+
+```{r}
+ggplot(polys, aes(x = rts_area, y = pq_n_unique)) +
+  geom_point() +
+  scale_x_log10()
+
+ggplot(polys, aes(x = rts_shape, y = pq_n_unique)) +
+  geom_point()
+
+ggplot(polys, aes(x = rts_area, y = rts_shape, color = pq_n_unique)) +
+  geom_point() +
+  scale_x_log10()
 ```
 
 
@@ -3094,7 +3168,6 @@ plots <- map(
             linewidth = 0.5) +
     scale_color_manual(name = '',
                        values = c(pq_colors[1], 'gray90')) +
-    theme_bw() +
     theme(axis.title = element_blank(),
           axis.text = element_blank(),
           axis.ticks = element_blank()))
@@ -3141,7 +3214,6 @@ plots <- map(
             linewidth = 0.5) +
     scale_color_manual(name = '',
                        values = c(pq_colors[3], 'gray90')) +
-    theme_bw() +
     theme(axis.title = element_blank(),
           axis.text = element_blank(),
           axis.ticks = element_blank()))
@@ -3188,7 +3260,6 @@ plots <- map(
             linewidth = 0.5) +
     scale_color_manual(name = '',
                        values = c(pq_colors[1], 'gray90')) +
-    theme_bw() +
     theme(axis.title = element_blank(),
           axis.text = element_blank(),
           axis.ticks = element_blank()))
@@ -3237,7 +3308,6 @@ plots <- map(
             linewidth = 0.5) +
     scale_color_manual(name = '',
                        values = c(pq_colors[3], 'gray90')) +
-    theme_bw() +
     theme(axis.title = element_blank(),
           axis.text = element_blank(),
           axis.ticks = element_blank()))
@@ -3284,7 +3354,6 @@ plots <- map(
             linewidth = 0.5) +
     scale_color_manual(name = '',
                        values = c(pq_colors[1], 'gray90')) +
-    theme_bw() +
     theme(axis.title = element_blank(),
           axis.text = element_blank(),
           axis.ticks = element_blank()))
@@ -3331,7 +3400,6 @@ plots <- map(
             linewidth = 0.5) +
     scale_color_manual(name = '',
                        values = c(pq_colors[3], 'gray90')) +
-    theme_bw() +
     theme(axis.title = element_blank(),
           axis.text = element_blank(),
           axis.ticks = element_blank()))
