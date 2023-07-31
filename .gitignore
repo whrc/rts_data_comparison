@@ -1,6 +1,8 @@
 # Project specific
 data/
 *.qgz
+figures/
+tables/
 
 # History files
 .Rhistory
