@@ -8,6 +8,8 @@ output:
 
 ## TODO:
 
+-   Change calculation of RTS shape to only rely on RTS of interest, not others which fall in the same tile
+-   Adds size and shape histograms to another figure somehow
 -   Start picking figures to include in manuscript!
 -   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
 
@@ -379,8 +381,8 @@ plot_prediction <- function(pid) {
   # get polygon data
   current_data <- polys %>%
     filter(id == pid) %>%
-    select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, val_geometry, 
-           pred_geometry)
+    select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, rts_geometry, 
+           val_geometry, pred_geometry)
 
   # prep RGB data
   current_rgb <- input_data %>%
@@ -415,6 +417,15 @@ plot_prediction <- function(pid) {
                          breaks = pq_labels,
                          labels = pq_labels,
                          values = pq_colors,
+                         drop = FALSE) +
+      new_scale('color') +
+      geom_sf(aes(geometry = rts_geometry,
+              color = 'Feature of Interest'),
+              fill = 'transparent',
+              linewidth = 0.5,
+              linetype = 'dashed') +
+      scale_color_manual(name = '',
+                         values = 'green',
                          drop = FALSE) +
       facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('RTS IoU:', round(rts_iou, 2))) +
       theme(axis.title = element_blank(),
@@ -690,7 +701,11 @@ pq_colors <- c('#00CCFF', 'gray20', '#CC0000')
 ```{r}
 rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.shp') %>%
   st_transform(crs = 3413) %>%
-  select(id = ID, region, status = Act_or_Gen, code_id, rts_area = Shape_Area, Long)
+  select(id = ID, region, status = Act_or_Gen, code_id, rts_area = Shape_Area, 
+         Long) %>%
+  mutate(rts_shape = as.numeric(
+    4*pi*st_area(geometry)/st_perimeter(geometry)^2)
+    ) # calculate Polsby-Popper value (shape compactness/roundness)
 ```
 
 ### Download Files
@@ -1143,8 +1158,7 @@ val_polys <- maxar_val_polys %>%
 polys <- polys %>%
   full_join(val_polys %>%
               as_tibble(),
-            by = c('id', 'imagery')) %>%
-  mutate(rts_shape = as.numeric(4*pi*st_area(val_geometry)/st_perimeter(val_geometry)^2)) # calculate Polsby-Popper value (shape compactness/roundness)
+            by = c('id', 'imagery'))
 
 rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 ```
@@ -1491,21 +1505,62 @@ polys <- polys %>%
 ```
 
 ```{r}
-ggplot(polys, aes(x = rts_area, fill = yg)) +
-  geom_histogram(position = position_dodge(), bins = 11) +
-  scale_fill_manual(values = c('gray50', 'gray20')) +
+rts_area_hist <- ggplot(polys, aes(x = rts_area, fill = yg)) +
+  geom_density(alpha = 0.9) +
+  scale_fill_manual(values = c('white', 'black')) +
   scale_x_log10(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'Count') +
+  scale_y_continuous(name = 'Density') +
   theme(legend.title = element_blank())
+rts_area_hist
+
+# ggsave('./figures/rts_area_hist.pdf',
+#        rts_area_hist,
+#        width = 6.5,
+#        height = 3)
+# ggsave('./figures/rts_area_hist.jpg',
+#        rts_area_hist,
+#        width = 6.5,
+#        height = 3)
 ```
 
 ```{r}
-ggplot(polys, aes(x = rts_shape, fill = yg)) +
-  geom_histogram(position = position_dodge(), bins = 11) +
-  scale_fill_manual(values = c('gray50', 'gray20')) +
-  scale_x_log10(name = expression('RTS Shape\n(Polsby-Popper)')) +
-  scale_y_continuous(name = 'Count') +
+rts_shape_hist <- ggplot(polys, aes(x = rts_shape, fill = yg)) +
+  geom_density(alpha = 0.9) +
+  scale_fill_manual(values = c('white', 'black')) +
+  scale_x_continuous(name = expression('RTS Shape')) +
+  scale_y_continuous(name = 'Density') +
   theme(legend.title = element_blank())
+rts_shape_hist
+
+# ggsave('./figures/rts_shape_hist.pdf',
+#        rts_shape_hist,
+#        width = 6.5,
+#        height = 3)
+# ggsave('./figures/rts_shape_hist.jpg',
+#        rts_shape_hist,
+#        width = 6.5,
+#        height = 3)
+```
+
+```{r, fig.height = 4, fig.width = 6.5}
+rts_area_shape_hist <- ggarrange(
+  rts_area_hist +
+    theme(legend.position = 'none'),
+  rts_shape_hist +
+    theme(legend.position = 'bottom'),
+  ncol = 1,
+  nrow = 2
+)
+rts_area_shape_hist
+
+# ggsave('./figures/rts_area_shape_hist.pdf',
+#        rts_area_shape_hist,
+#        width = 6.5,
+#        height = 4)
+# ggsave('./figures/rts_area_shape_hist.jpg',
+#        rts_area_shape_hist,
+#        width = 6.5,
+#        height = 4)
 ```
 
 ```{r}
@@ -1524,6 +1579,12 @@ knitr::kable(rts_summaries)
 Raw IoU Scores:
 
 Run `nls` models and bootstrap parameters
+
+```{r}
+single_rts <- polys %>%
+  ungroup() %>%
+  filter(st_geometry_type(val_geometry) == 'POLYGON')
+```
 
 ```{r}
 # maxar_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
@@ -1550,6 +1611,19 @@ maxar_iou_boot <- readRDS('./data/models/maxar_iou_boot.RData')
 maxar_rts_iou_nls <- readRDS('./data/models/maxar_rts_iou_nls.RData')
 maxar_rts_iou_boot <- readRDS('./data/models/maxar_rts_iou_boot.RData')
 summary(maxar_rts_iou_nls)
+
+# maxar_single_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
+#                start = list(Km = 50, Vmax = 2),
+#                data = single_rts %>%
+#                  filter(imagery == 'Maxar'))
+# 
+# maxar_single_rts_iou_boot <- nlsBoot(maxar_single_rts_iou_nls, 500000)
+# saveRDS(maxar_single_rts_iou_nls, './data/models/maxar_single_rts_iou_nls.RData')
+# saveRDS(maxar_single_rts_iou_boot, './data/models/maxar_single_rts_iou_boot.RData')
+
+maxar_single_rts_iou_nls <- readRDS('./data/models/maxar_single_rts_iou_nls.RData')
+maxar_single_rts_iou_boot <- readRDS('./data/models/maxar_single_rts_iou_boot.RData')
+summary(maxar_single_rts_iou_nls)
 ```
 
 ```{r}
@@ -1577,6 +1651,19 @@ planet_iou_boot <- readRDS('./data/models/planet_iou_boot.RData')
 planet_rts_iou_nls <- readRDS('./data/models/planet_rts_iou_nls.RData')
 planet_rts_iou_boot <- readRDS('./data/models/planet_rts_iou_boot.RData')
 summary(planet_rts_iou_nls)
+
+# planet_single_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
+#                start = list(Km = 50, Vmax = 2),
+#                data = single_rts %>%
+#                  filter(imagery == 'Planet'))
+# 
+# planet_single_rts_iou_boot <- nlsBoot(planet_single_rts_iou_nls, 500000)
+# saveRDS(planet_single_rts_iou_nls, './data/models/planet_single_rts_iou_nls.RData')
+# saveRDS(planet_single_rts_iou_boot, './data/models/planet_single_rts_iou_boot.RData')
+
+planet_single_rts_iou_nls <- readRDS('./data/models/planet_single_rts_iou_nls.RData')
+planet_single_rts_iou_boot <- readRDS('./data/models/planet_single_rts_iou_boot.RData')
+summary(planet_single_rts_iou_nls)
 ```
 
 ```{r}
@@ -1604,6 +1691,59 @@ sentinel_iou_boot <- readRDS('./data/models/sentinel_iou_boot.RData')
 sentinel_rts_iou_nls <- readRDS('./data/models/sentinel_rts_iou_nls.RData')
 sentinel_rts_iou_boot <- readRDS('./data/models/sentinel_rts_iou_boot.RData')
 summary(sentinel_rts_iou_nls)
+
+# sentinel_single_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
+#                start = list(Km = 50, Vmax = 2),
+#                data = polys %>%
+#                  filter(imagery == 'Sentinel-2'))
+# 
+# sentinel_single_rts_iou_boot <- nlsBoot(sentinel_single_rts_iou_nls, 500000)
+# saveRDS(sentinel_single_rts_iou_nls, './data/models/sentinel_single_rts_iou_nls.RData')
+# saveRDS(sentinel_single_rts_iou_boot, './data/models/sentinel_single_rts_iou_boot.RData')
+
+sentinel_single_rts_iou_nls <- readRDS('./data/models/sentinel_single_rts_iou_nls.RData')
+sentinel_single_rts_iou_boot <- readRDS('./data/models/sentinel_single_rts_iou_boot.RData')
+summary(sentinel_single_rts_iou_nls)
+```
+
+Table for nls model summaries
+
+```{r}
+rts_iou_summary <- tidy(maxar_rts_iou_nls) %>%
+  mutate(Imagery = 'Maxar') %>%
+  rbind(tidy(planet_rts_iou_nls) %>%
+          mutate(Imagery = 'Planet')) %>%
+  rbind(tidy(sentinel_rts_iou_nls) %>%
+          mutate(Imagery = 'Sentinel-2')) %>%
+  mutate(across(estimate:p.value, ~ round(.x, 3)),
+         p.value = case_when(p.value == 0 ~ '<0.001',
+                             p.value > 0 ~ as.character(p.value))) %>%
+  select(Imagery, Term = term, Estimate = estimate, SE = std.error, 
+         `t-statistic` = statistic, `p-value` = p.value)
+
+# write.csv(rts_iou_summary,
+#           './tables/iou_size_nls.csv',
+#           row.names = FALSE)
+
+knitr::kable(rts_iou_summary)
+
+single_rts_iou_summary <- tidy(maxar_single_rts_iou_nls) %>%
+  mutate(Imagery = 'Maxar') %>%
+  rbind(tidy(planet_single_rts_iou_nls) %>%
+          mutate(Imagery = 'Planet')) %>%
+  rbind(tidy(sentinel_single_rts_iou_nls) %>%
+          mutate(Imagery = 'Sentinel-2')) %>%
+  mutate(across(estimate:p.value, ~ round(.x, 3)),
+         p.value = case_when(p.value == 0 ~ '<0.001',
+                             p.value > 0 ~ as.character(p.value))) %>%
+  select(Imagery, Term = term, Estimate = estimate, SE = std.error, 
+         `t-statistic` = statistic, `p-value` = p.value)
+
+# write.csv(single_rts_iou_summary,
+#           './tables/single_rts_iou_size_nls.csv',
+#           row.names = FALSE)
+
+knitr::kable(single_rts_iou_summary)
 ```
 
 Bootstrap predictions for plotting the `nls` models
@@ -1630,6 +1770,15 @@ maxar_rts_iou_ci <- newdata %>%
   cbind(maxar_rts_iou_predict %>%
           as_tibble()) %>%
   select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
+
+# maxar_single_rts_iou_predict <- my_nlsBootPredict(maxar_single_rts_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(maxar_single_rts_iou_predict, './data/models/maxar_single_rts_iou_predict.RData')
+
+maxar_single_rts_iou_predict <- readRDS('./data/models/maxar_single_rts_iou_predict.RData')
+maxar_single_rts_iou_ci <- newdata %>%
+  cbind(maxar_single_rts_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 ```
 
 ```{r}
@@ -1650,6 +1799,15 @@ planet_rts_iou_ci <- newdata %>%
   cbind(planet_rts_iou_predict %>%
           as_tibble()) %>%
   select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
+
+# planet_single_rts_iou_predict <- my_nlsBootPredict(planet_single_rts_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(planet_single_rts_iou_predict, './data/models/planet_single_rts_iou_predict.RData')
+
+planet_single_rts_iou_predict <- readRDS('./data/models/planet_single_rts_iou_predict.RData')
+planet_single_rts_iou_ci <- newdata %>%
+  cbind(planet_single_rts_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 ```
 
 ```{r}
@@ -1668,6 +1826,15 @@ sentinel_iou_ci <- newdata %>%
 sentinel_rts_iou_predict <- readRDS('./data/models/sentinel_rts_iou_predict.RData')
 sentinel_rts_iou_ci <- newdata %>%
   cbind(sentinel_rts_iou_predict %>%
+          as_tibble()) %>%
+  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
+
+# sentinel_single_rts_iou_predict <- my_nlsBootPredict(sentinel_single_rts_iou_boot, newdata = newdata, interval = 'prediction')
+# saveRDS(sentinel_single_rts_iou_predict, './data/models/sentinel_single_rts_iou_predict.RData')
+
+sentinel_single_rts_iou_predict <- readRDS('./data/models/sentinel_single_rts_iou_predict.RData')
+sentinel_single_rts_iou_ci <- newdata %>%
+  cbind(sentinel_single_rts_iou_predict %>%
           as_tibble()) %>%
   select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 ```
@@ -1719,7 +1886,33 @@ polys <- polys %>%
     rts_iou_pred_lwr = rts_iou_predictions[, 2],
     rts_iou_pred_upr = rts_iou_predictions[, 3]
   )
+
+single_rts_iou_predictions <- rbind(
+  my_nlsBootPredict(maxar_single_rts_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Maxar'),
+                    interval = 'prediction'),
+  my_nlsBootPredict(planet_single_rts_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Planet'),
+                    interval = 'prediction'),
+  my_nlsBootPredict(sentinel_single_rts_iou_boot, 
+                    polys %>%
+                      as_tibble() %>%
+                      filter(imagery == 'Sentinel-2'),
+                    interval = 'prediction')
+  )
+
+single_rts <- single_rts %>%
+  mutate(
+    rts_iou_pred = single_rts_iou_predictions[, 1],
+    rts_iou_pred_lwr = single_rts_iou_predictions[, 2],
+    rts_iou_pred_upr = single_rts_iou_predictions[, 3]
+  )
 ```
+# Start Here Next Time
 
 Plot the Size/Performance plot
 
@@ -1775,6 +1968,31 @@ ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
   scale_color_manual(values = imagery_colors,
                      labels = imagery_labels) +
   theme(legend.title = element_blank())
+
+```
+
+```{r}
+ggplot(polys, 
+      aes(x = rts_area, y = rts_iou, color = imagery, shape = st_geometry_type(val_geometry))) +
+  geom_point(size = 1) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'RTS IoU') +
+  scale_color_manual(values = imagery_colors,
+                     labels = imagery_labels) +
+  scale_shape_manual(values = c(16, 1)) +
+  theme(legend.title = element_blank())
+
+ggplot(polys, 
+      aes(x = rts_area, y = rts_iou, color = imagery, shape = st_geometry_type(val_geometry))) +
+  geom_point(size = 1) +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_y_continuous(name = 'RTS IoU') +
+  scale_color_manual(values = imagery_colors,
+                     labels = imagery_labels) +
+  scale_shape_manual(values = c(16, 1)) +
+  facet_grid(. ~ st_geometry_type(val_geometry)) +
+  theme(legend.title = element_blank())
+
 
 ```
 
@@ -2994,7 +3212,7 @@ ggplot(polys,
 ```
 
 ```{r}
-ggplot(polys, 
+rts_shape_area_iou <- ggplot(polys, 
        aes(x = rts_shape, y = rts_area, color = rts_iou, shape = yg)) +
   geom_point() +
   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
@@ -3004,13 +3222,28 @@ ggplot(polys,
   scale_shape_manual(name = 'Region',
                      values = c(1, 16)) +
   facet_grid(. ~ imagery)
+rts_shape_area_iou
 
-ggsave('./figures/rts_shape_area.pdf',
-       height = 4,
-       width = 6.5)
-ggsave('./figures/rts_shape_area.jpg',
-       height = 4,
-       width = 6.5)
+# ggsave('./figures/rts_shape_area.pdf',
+#        shape_area_iou,
+#        height = 4,
+#        width = 6.5)
+# ggsave('./figures/rts_shape_area.jpg',
+#        shape_area_iou,
+#        height = 4,
+#        width = 6.5)
+
+ggplot(polys %>%
+         filter(st_geometry_type(val_geometry) == 'POLYGON'), 
+       aes(x = rts_shape, y = rts_area, color = rts_iou, shape = yg)) +
+  geom_point() +
+  scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
+  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
+                labels = scales::label_number(big.mark = '')) +
+  scale_color_viridis(name = 'RTS IoU') +
+  scale_shape_manual(name = 'Region',
+                     values = c(1, 16)) +
+  facet_grid(. ~ imagery)
 ```
 
 ```{r}
@@ -3021,25 +3254,34 @@ smallest <- rts_iou ~ 1
 biggest <- rts_iou ~ rts_area_log10 * rts_shape
 m <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
         data = polys %>%
-          filter(imagery == 'Maxar'))
+          filter(imagery == 'Maxar' & st_geometry_type(val_geometry) == 'POLYGON'))
 maxar_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
 
 m <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
         data = polys %>%
-          filter(imagery == 'Planet'))
+          filter(imagery == 'Planet' & st_geometry_type(val_geometry) == 'POLYGON'))
 planet_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
+summary(planet_iou_lm)
 # the r2 and AIC are about the same for Planet with rts_iou ~ rts_area_log10
 # or rts_iou ~ rts_area_log10 * rts_shape
 # to allow comparison of the imagery types, I will stick with the more complex
-# model that was chosen as the best for both Maxar and Sentinel-2
+# model that was chosen as the best for Maxar
 planet_iou_lm <- lm(rts_iou ~ rts_area_log10 * rts_shape,
                     data = polys %>%
-          filter(imagery == 'Planet'))
+          filter(imagery == 'Planet' & st_geometry_type(val_geometry) == 'POLYGON'))
 
 m <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
         data = polys %>%
-          filter(imagery == 'Sentinel-2'))
+          filter(imagery == 'Sentinel-2' & st_geometry_type(val_geometry) == 'POLYGON'))
 sentinel_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
+summary(sentinel_iou_lm)
+# the r2 and AIC are about the same for Planet with rts_iou ~ rts_area_log10
+# or rts_iou ~ rts_area_log10 * rts_shape
+# to allow comparison of the imagery types, I will stick with the more complex
+# model that was chosen as the best for Maxar
+sentinel_iou_lm <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
+        data = polys %>%
+          filter(imagery == 'Sentinel-2' & st_geometry_type(val_geometry) == 'POLYGON'))
 
 iou_lm_output <- tidy(maxar_iou_lm) %>%
   mutate(Imagery = 'Maxar',
@@ -3092,7 +3334,7 @@ ggplot(aes(x = ndwi_mean, y = rts_area, color = yg)) +
 All models are tripped up by the Yamal/Gydan Region.
 
 ```{r}
-ggplot(polys,
+rts_pq_hist <- ggplot(polys,
        aes(x = yg, fill = pq_ci)) +
   geom_bar(position = 'fill') +
   scale_x_discrete(name = 'Region') +
@@ -3101,6 +3343,16 @@ ggplot(polys,
                     values = pq_colors) +
   facet_grid(. ~ imagery) +
   theme(axis.title.y = element_blank())
+rts_pq_hist
+
+# ggsave('./figures/rts_pq_hist.pdf',
+#        rts_pq_hist,
+#        height = 4,
+#        width = 6.5)
+# ggsave('./figures/rts_pq_hist.jpg',
+#        rts_pq_hist,
+#        height = 4,
+#        width = 6.5)
 ```
 
 ```{r, fig.height = 5, fig.width = 7}
