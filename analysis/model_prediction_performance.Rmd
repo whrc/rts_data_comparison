@@ -8,7 +8,8 @@ output:
 
 ## TODO:
 
--   Change calculation of RTS shape to only rely on RTS of interest, not others which fall in the same tile
+-   Figure out how to add tiles with multipolygons back into the analysis accurately (mask the tiles somehow)
+-   Add median RTS IoU to table with thresholds
 -   Add general and active IoU's to table
 -   Start picking figures to include in manuscript!
 -   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
@@ -2404,9 +2405,9 @@ ggplot(single_rts,
              size = 1,
              shape = 16,
              inherit.aes = FALSE) +
-  scale_color_manual(values = 'gray') +
+  scale_color_manual(name = '', values = 'gray') +
   new_scale('color') +
-  geom_point(aes(color = pq_ci)) +
+  geom_point(aes(color = pq_ci, shape = yg)) +
   scale_color_manual(name = 'Prediction Quality',
                      values = pq_colors) +
   new_scale('color') +
@@ -2428,10 +2429,8 @@ ggplot(single_rts,
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
   scale_y_continuous(name = 'RTS IoU',
                      limits = c(0, 1.02)) +
-  scale_shape_manual(#name = 'Region',
+  scale_shape_manual(name = 'Region',
                      values = c(16, 1)) +
-  scale_alpha_manual(#name = 'Region',
-                     values = c(1, 0.3)) +
   facet_grid(. ~ imagery) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
