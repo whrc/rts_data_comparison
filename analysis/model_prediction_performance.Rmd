@@ -8,8 +8,7 @@ output:
 
 ## TODO:
 
--   Figure out how to add tiles with multipolygons back into the analysis accurately (mask the tiles somehow)
--   Add median RTS IoU to table with thresholds
+-   Fix input_data so that it contains all pixels and then figure out how to get zonal stats so that it only contains the pixels within the mask
 -   Add general and active IoU's to table
 -   Start picking figures to include in manuscript!
 -   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
@@ -154,6 +153,34 @@ eval_expression <- function(expression, x) {
 }
 ```
 
+### feature_mask
+
+```{r}
+feature_mask <- function(validation, polys) {
+  
+  # get validation layer (all RTS features within the tile)
+  val <- validation[['RTSlabel']]
+  
+  # get polygon ID associated with validation layer
+  pid <- get_rast_id(val)
+  
+  # get the outline of the polygon of interest
+  tgt <- polys %>%
+    filter(id == pid) %>%
+    rasterize(val, touches = TRUE)
+  
+  # calculate distance from validation polygons
+  val_dist <- distance(val)
+  tgt_dist <- distance(tgt)
+  
+  # create a mask that only keeps cells where the euclidean distance from the polygon of interest is smaller than the euclidean distance from all RTS features that occur within the tile
+  mask <- tgt
+  mask[tgt_dist <= val_dist] <- 1
+  
+  return(mask)
+}
+```
+
 ### filter_input_data
 
 ```{r}
@@ -216,7 +243,10 @@ googledrive_download <- function(name, id, drive_resource, directory) {
 ### input_as_df
 
 ```{r, include = FALSE}
-input_as_df <- function(input, pred) {
+input_as_df <- function(input, pred, aoi_mask) {
+  
+  input <- mask(input, aoi_mask)
+  pred <- mask(pred, aoi_mask)
   
   input[['prediction']] <- pred[['prediction']]
   
@@ -311,6 +341,15 @@ make_my_dir <- function(output_dir) {
     dir.create(output_dir, recursive = TRUE)
   }
   
+}
+```
+
+### mask_as_df
+
+```{r}
+mask_as_df <- function(mask, pid) {
+  st_as_sf(as.polygons(mask, values = FALSE)) %>%
+           mutate(id = pid)
 }
 ```
 
@@ -963,10 +1002,16 @@ rm(maxar_pred_files)
 ```
 
 ```{r, include = FALSE}
+pred_ids <- c()
+for (pred in maxar_preds) {
+  pred_ids <- c(pred_ids, get_rast_id(pred))
+}
+
 maxar_input <- map(maxar_input_files, ~ rast(.x))
 ids <- map_chr(maxar_input, ~ get_rast_id(.x))
 names(maxar_input) <- ids
 
+maxar_input <- filter_input_data(maxar_input, pred_ids)
 rm(maxar_input_files)
 ```
 
@@ -984,6 +1029,7 @@ planet_input <- map(planet_input_files, ~ rast(.x))
 ids <- map_chr(planet_input, ~ get_rast_id(.x))
 names(planet_input) <- ids
 
+planet_input <- filter_input_data(planet_input, pred_ids)
 rm(planet_input_files)
 ```
 
@@ -1000,6 +1046,7 @@ sentinel_input <- map(sentinel_input_files, ~ rast(.x))
 ids <- map_chr(sentinel_input, ~ get_rast_id(.x))
 names(sentinel_input) <- ids
 
+sentinel_input <- filter_input_data(sentinel_input, pred_ids)
 rm(sentinel_input_files)
 ```
 
@@ -1041,53 +1088,48 @@ rm(tiles)
 ```
 
 
-## Convert Predictions to Vector
+## Create AOI Masks for Tiles
 
-### Calculate Best RTS Threshold
+This allows the inclusion of RTS features that are in tiles with multiple features, by masking out areas associated with RTS features that are not the feature of interest
 
 ```{r}
-# maxar_rts_threshold <- maxar_preds %>% 
-#   map_dfr(~ calc_rts_threshold(.x, seq(0.35, 0.6, by = 0.01))) %>%
-#   group_by(threshold) %>%
-#   summarise(mean_iou = mean(mean_iou)) %>%
-#   ungroup() %>%
-#   filter(mean_iou == max(mean_iou)) %>%
-#   select(threshold) %>%
-#   as.numeric()
-# 
-# maxar_rts_threshold_zscore <- maxar_preds_zscore %>% 
-#   map_dfr(~ calc_rts_threshold(.x, seq(0.35, 0.6, by = 0.01))) %>%
-#   group_by(threshold) %>%
-#   summarise(mean_iou = mean(mean_iou)) %>%
-#   ungroup() %>%
-#   filter(mean_iou == max(mean_iou)) %>%
-#   select(threshold) %>%
-#   as.numeric()
-# 
-# planet_rts_threshold <- planet_preds %>% 
-#   map_dfr(~ calc_rts_threshold(.x, seq(0.35, 0.6, by = 0.01))) %>%
-#   group_by(threshold) %>%
-#   summarise(mean_iou = mean(mean_iou)) %>%
-#   ungroup() %>%
-#   filter(mean_iou == max(mean_iou)) %>%
-#   select(threshold) %>%
-#   as.numeric()
-# 
-# sentinel_rts_threshold <- sentinel_preds %>% 
-#   map_dfr(~ calc_rts_threshold(.x, seq(0.35, 0.6, by = 0.01))) %>%
-#   group_by(threshold) %>%
-#   summarise(mean_iou = mean(mean_iou)) %>%
-#   ungroup() %>%
-#   filter(mean_iou == max(mean_iou)) %>%
-#   select(threshold) %>%
-#   as.numeric()
+maxar_masks <- maxar_input %>%
+  map(~ feature_mask(.x, rts_outlines))
+
+planet_masks <- planet_input %>%
+          map(~ feature_mask(.x, rts_outlines))
+
+sentinel_masks <- sentinel_input %>%
+          map(~ feature_mask(.x, rts_outlines))
+
+masks <- maxar_masks %>%
+  map2_dfr(pred_ids, ~ mask_as_df(.x, .y)) %>%
+  mutate(imagery = 'Maxar') %>%
+  rbind(planet_masks %>%
+          map2_dfr(pred_ids, ~ mask_as_df(.x, .y)) %>%
+          mutate(imagery = 'Planet')) %>%
+  rbind(sentinel_masks %>%
+          map2_dfr(pred_ids, ~ mask_as_df(.x, .y)) %>%
+          mutate(imagery = 'Sentinel-2'))
 ```
+
+```{r}
+polys <- polys %>%
+  left_join(masks %>%
+              as_tibble() %>%
+              select(imagery, id, mask_geometry = geometry),
+            by = c('imagery', 'id'))
+rm(masks)
+```
+
+
+## Convert Predictions to Vector
 
 ```{r}
 maxar_pred_polys <- maxar_preds %>%
   map_dfr(
     ~ pred_as_poly(
-      .x#, maxar_rts_threshold
+      .x
       )
     ) %>%
   mutate(imagery = 'Maxar')
@@ -1095,7 +1137,7 @@ maxar_pred_polys <- maxar_preds %>%
 maxar_pred_polys_zscore <- maxar_preds_zscore %>%
   map_dfr(
     ~ pred_as_poly(
-      .x#, maxar_rts_threshold_zscore
+      .x
       )
     ) %>%
   mutate(imagery = 'Maxar')
@@ -1103,7 +1145,7 @@ maxar_pred_polys_zscore <- maxar_preds_zscore %>%
 planet_pred_polys <- planet_preds %>%
   map_dfr(
     ~ pred_as_poly(
-      .x#, planet_rts_threshold
+      .x
       )
     ) %>%
   mutate(imagery = 'Planet')
@@ -1127,7 +1169,15 @@ pred_polys <- maxar_pred_polys %>%
 polys <- polys %>%
   full_join(pred_polys %>%
               as_tibble(),
-            by = c('id', 'imagery'))
+            by = c('id', 'imagery')) %>%
+  mutate(pred_geometry = st_as_sfc(pmap(list(pred_geometry, 
+                                             mask_geometry), 
+                                        ~ st_intersection(...)),
+                                   crs = crs(polys)),
+         pred_bg_geometry = st_as_sfc(pmap(list(pred_bg_geometry, 
+                                                 mask_geometry), 
+                                            ~ st_intersection(...)),
+                                       crs = crs(polys)))
 
 rm(maxar_pred_polys, planet_pred_polys, sentinel_pred_polys, pred_polys)
 ```
@@ -1159,7 +1209,15 @@ val_polys <- maxar_val_polys %>%
 polys <- polys %>%
   full_join(val_polys %>%
               as_tibble(),
-            by = c('id', 'imagery'))
+            by = c('id', 'imagery')) %>%
+  mutate(val_mask_geometry = st_as_sfc(pmap(list(val_geometry, 
+                                                 mask_geometry), 
+                                            ~ st_intersection(...)),
+                                       crs = crs(polys)),
+         val_bg_mask_geometry = st_as_sfc(pmap(list(val_bg_geometry, 
+                                                    mask_geometry), 
+                                               ~ st_intersection(...)),
+                                          crs = crs(polys)))
 
 rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 ```
@@ -1168,24 +1226,28 @@ rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 ## Convert Input Data to DF
 
 ```{r}
-pred_ids <- c()
-for (pred in maxar_preds) {
-  pred_ids <- c(pred_ids, get_rast_id(pred))
-}
-
-maxar_input_filtered <- filter_input_data(maxar_input, pred_ids)
-planet_input_filtered <- filter_input_data(planet_input, pred_ids)
-sentinel_input_filtered <- filter_input_data(sentinel_input, pred_ids)
-
-input_data <- maxar_input_filtered %>%
-  map2_dfr(maxar_preds, ~ input_as_df(.x, .y)) %>%
+input_data <- pmap(list(x = maxar_input, 
+                        y = maxar_preds, 
+                        z = maxar_masks),
+                   \(x, y, z) input_as_df(x, y, z)) %>%
+  list_rbind() %>%
   mutate(imagery = 'Maxar') %>%
-  rbind.data.frame(planet_input_filtered %>%
-                     map2_dfr(planet_preds, ~ input_as_df(.x, .y)) %>%
-                     mutate(imagery = 'Planet')) %>%
-  rbind.data.frame(sentinel_input_filtered %>%
-                     map2_dfr(sentinel_preds, ~ input_as_df(.x, .y)) %>%
-                     mutate(imagery = 'Sentinel-2')) %>%
+  rbind(
+    pmap(list(x = planet_input, 
+              y = planet_preds, 
+              z = planet_masks),
+         \(x, y, z) input_as_df(x, y, z)) %>%
+      list_rbind() %>%
+      mutate(imagery = 'Planet')
+  ) %>%
+  rbind(
+    pmap(list(x = sentinel_input, 
+              y = sentinel_preds, 
+              z = sentinel_masks),
+         \(x, y, z) input_as_df(x, y, z)) %>%
+      list_rbind() %>%
+      mutate(imagery = 'Sentinel-2')
+  ) %>%
   select(imagery, id, rts_class, x, y, 
          r, g, b, lum, nir, ndvi, ndwi, elev, sr, 
          r_stretch, g_stretch, b_stretch, color_hex, prediction)
@@ -1223,19 +1285,19 @@ leaflet() %>%
 ```{r}
 polys <- polys %>%
   mutate(rts_int_geometry = st_as_sfc(pmap(list(pred_geometry, 
-                                                val_geometry), 
+                                                val_mask_geometry), 
                                            ~ st_intersection(...)),
                                   crs = crs(polys)),
          rts_uni_geometry = st_as_sfc(pmap(list(pred_geometry, 
-                                                val_geometry), 
+                                                val_mask_geometry), 
                                            ~ st_union(...)),
                                   crs = crs(polys)),
          bg_int_geometry = st_as_sfc(pmap(list(pred_bg_geometry, 
-                                               val_bg_geometry), 
+                                               val_bg_mask_geometry), 
                                           ~ st_intersection(...)),
                                   crs = crs(polys)),
          bg_uni_geometry = st_as_sfc(pmap(list(pred_bg_geometry, 
-                                               val_bg_geometry), 
+                                               val_bg_mask_geometry), 
                                           ~ st_union(...)),
                                   crs = crs(polys)))
 ```
@@ -1318,136 +1380,6 @@ knitr::kable(imagery_performance_summary)
 ```
 
 
-## Mean Average Precision
-
-### Recall-Precision Curves
-
-```{r}
-polys <- polys %>%
-  mutate(ground_truth = 1)
-
-thresholds <- seq(0.2, 0.8, by = 0.1)
-
-maxar_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Maxar')$ground_truth, 
-                                      filter(polys, imagery == 'Maxar')$rts_iou, 
-                                      thresholds)
-
-planet_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Planet')$ground_truth, 
-                                       filter(polys, imagery == 'Planet')$rts_iou, 
-                                       thresholds)
-
-sentinel_rts_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$ground_truth, 
-                                         filter(polys, imagery == 'Sentinel-2')$rts_iou, 
-                                         thresholds)
-
-rts_rec_pre <- maxar_rts_rec_pre %>%
-  mutate(imagery = 'Maxar') %>%
-  rbind.data.frame(planet_rts_rec_pre %>%
-                     mutate(imagery = 'Planet')) %>%
-  rbind.data.frame(sentinel_rts_rec_pre %>%
-                     mutate(imagery = 'Sentinel-2'))
-
-
-maxar_bg_rec_pre <- recall_precision(filter(polys, imagery == 'Maxar')$ground_truth, 
-                           filter(polys, imagery == 'Maxar')$bg_iou, 
-                           thresholds)
-
-planet_bg_rec_pre <- recall_precision(filter(polys, imagery == 'Planet')$ground_truth, 
-                           filter(polys, imagery == 'Planet')$bg_iou, 
-                           thresholds)
-
-sentinel_bg_rec_pre <- recall_precision(filter(polys, imagery == 'Sentinel-2')$ground_truth, 
-                           filter(polys, imagery == 'Sentinel-2')$bg_iou, 
-                           thresholds)
-
-bg_rec_pre <- maxar_bg_rec_pre %>%
-  mutate(imagery = 'Maxar') %>%
-  rbind.data.frame(planet_bg_rec_pre %>%
-                     mutate(imagery = 'Planet')) %>%
-  rbind.data.frame(sentinel_bg_rec_pre %>%
-                     mutate(imagery = 'Sentinel-2'))
-
-rec_pre <- rts_rec_pre %>%
-  mutate(class = 'rts') %>%
-  rbind.data.frame(bg_rec_pre %>%
-                     mutate(class = 'bg'))
-
-rm(maxar_rts_rec_pre, planet_rts_rec_pre, sentinel_rts_rec_pre,
-   maxar_bg_rec_pre, planet_bg_rec_pre, sentinel_bg_rec_pre,
-   rts_rec_pre, bg_rec_pre)
-```
-
-### MAP
-
-```{r}
-avg_pre <- rec_pre %>%
-  group_by(imagery, class) %>%
-  summarise(avg_pre = avg_precision(recall, precision))
-
-mean_avg_pre <- avg_pre %>%
-  group_by(imagery) %>%
-  summarise(map = mean(avg_pre)) %>%
-  mutate(x_loc = rep(0, 3),
-         y_loc = seq(0.2, 0, length.out = 3),
-         map_label = paste(imagery, 'MAP =', round(map, 2)))
-```
-
-### Plot
-
-Precision measures false positives. Recall measures false negatives.
-
-This figure will only be interesting once we have added in negative training data.
-
-```{r}
-arrow_data <- tibble(x = c(0.5, -0.28),
-                     xend = c(1, -0.28),
-                     y = c(-0.24, 0.5),
-                     yend = c(-0.24, 1),
-                     imagery = rep('Maxar', 2),
-                     class = rep('rts', 2))
-label_data <- tibble(x = c(0, -0.28),
-                     y = c(-0.24, 0),
-                     label = c('Fewer False Negatives    ',
-                               'Fewer False Positives    '),
-                     angle = c(0, 90),
-                     imagery = rep('Maxar', 2),
-                     class = rep('rts', 2))
-
-rec_pre_plot <- ggplot(rec_pre,
-                       aes(x = recall, y = precision, color = imagery, linetype = class)) +
-  geom_line() +
-  geom_text(data = mean_avg_pre,
-            aes(x = x_loc, y = y_loc, label = map_label),
-            inherit.aes = FALSE,
-            hjust = 0,
-            vjust = 0) +
-  geom_segment(data = arrow_data,
-               aes(x = x, y = y,
-                   xend = xend, yend = yend),
-               inherit.aes = FALSE,
-               arrow = arrow(type = 'closed', length = unit(0.02, 'npc'))) +
-  geom_text(data = label_data,
-            aes(x = x, y = y, label = label, angle = angle),
-            inherit.aes = FALSE,
-            size = 3.5,
-            hjust = 0,
-            vjust = 0.4,
-            color = 'black') +
-  scale_x_continuous(name = 'Recall') +
-  scale_y_continuous(name = 'Precision') +
-  scale_color_manual(labels = imagery_labels,
-                     values = imagery_colors) +
-  scale_linetype_manual(labels = c('Background', 'RTS'),
-                        values = c('dashed', 'solid')) +
-  # facet_grid(. ~ imagery) +
-  coord_fixed(xlim = c(0, 1),
-                  ylim = c(0, 1),
-                  clip = 'off') +
-  theme(legend.title = element_blank(),
-        plot.margin = margin(t = 5.5, r = 5.5, b = 30, l = 30, unit = 'pt'))
-rec_pre_plot
-```
-
 ## Performance by Feature Size
 
 ### Calculate Area
@@ -1505,7 +1437,7 @@ polys <- polys %>%
 #           linewidth = 1)
 ```
 
-```{r}
+```{r, include = FALSE}
 rts_area_hist <- ggplot(polys, aes(x = rts_area, fill = yg)) +
   geom_density(alpha = 0.9) +
   scale_fill_manual(values = c('white', 'black')) +
@@ -1524,7 +1456,7 @@ rts_area_hist
 #        height = 3)
 ```
 
-```{r}
+```{r, include = FALSE}
 rts_shape_hist <- ggplot(polys, aes(x = rts_shape, fill = yg)) +
   geom_density(alpha = 0.9) +
   scale_fill_manual(values = c('white', 'black')) +
@@ -1552,7 +1484,6 @@ rts_area_shape_hist <- ggarrange(
   ncol = 1,
   nrow = 2
 )
-rts_area_shape_hist
 
 # ggsave('./figures/rts_area_shape_hist.pdf',
 #        rts_area_shape_hist,
@@ -1588,7 +1519,7 @@ single_rts <- polys %>%
 ```
 
 ```{r}
-# maxar_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
+# maxar_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
 #                data = polys %>%
 #                  filter(imagery == 'Maxar'))
@@ -1599,19 +1530,7 @@ single_rts <- polys %>%
 
 maxar_iou_nls <- readRDS('./data/models/maxar_iou_nls.RData')
 maxar_iou_boot <- readRDS('./data/models/maxar_iou_boot.RData')
-
-# maxar_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
-#                start = list(Km = 50, Vmax = 2),
-#                data = polys %>%
-#                  filter(imagery == 'Maxar'))
-# 
-# maxar_rts_iou_boot <- nlsBoot(maxar_rts_iou_nls, 500000)
-# saveRDS(maxar_rts_iou_nls, './data/models/maxar_rts_iou_nls.RData')
-# saveRDS(maxar_rts_iou_boot, './data/models/maxar_rts_iou_boot.RData')
-
-maxar_rts_iou_nls <- readRDS('./data/models/maxar_rts_iou_nls.RData')
-maxar_rts_iou_boot <- readRDS('./data/models/maxar_rts_iou_boot.RData')
-summary(maxar_rts_iou_nls)
+summary(maxar_iou_nls)
 
 # maxar_single_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
@@ -1628,7 +1547,7 @@ summary(maxar_single_rts_iou_nls)
 ```
 
 ```{r}
-# planet_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
+# planet_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
 #                data = polys %>%
 #                  filter(imagery == 'Planet'))
@@ -1639,19 +1558,7 @@ summary(maxar_single_rts_iou_nls)
 
 planet_iou_nls <- readRDS('./data/models/planet_iou_nls.RData')
 planet_iou_boot <- readRDS('./data/models/planet_iou_boot.RData')
-
-# planet_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
-#                start = list(Km = 50, Vmax = 2),
-#                data = polys %>%
-#                  filter(imagery == 'Planet'))
-# 
-# planet_rts_iou_boot <- nlsBoot(planet_rts_iou_nls, 500000)
-# saveRDS(planet_rts_iou_nls, './data/models/planet_rts_iou_nls.RData')
-# saveRDS(planet_rts_iou_boot, './data/models/planet_rts_iou_boot.RData')
-
-planet_rts_iou_nls <- readRDS('./data/models/planet_rts_iou_nls.RData')
-planet_rts_iou_boot <- readRDS('./data/models/planet_rts_iou_boot.RData')
-summary(planet_rts_iou_nls)
+summary(planet_iou_nls)
 
 # planet_single_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
@@ -1668,7 +1575,7 @@ summary(planet_single_rts_iou_nls)
 ```
 
 ```{r}
-# sentinel_iou_nls <- nls(mean_iou ~ Vmax * rts_area / (Km + rts_area),
+# sentinel_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
 #                data = polys %>%
 #                  filter(imagery == 'Sentinel-2'))
@@ -1679,19 +1586,7 @@ summary(planet_single_rts_iou_nls)
 
 sentinel_iou_nls <- readRDS('./data/models/sentinel_iou_nls.RData')
 sentinel_iou_boot <- readRDS('./data/models/sentinel_iou_boot.RData')
-
-# sentinel_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
-#                start = list(Km = 50, Vmax = 2),
-#                data = polys %>%
-#                  filter(imagery == 'Sentinel-2'))
-# 
-# sentinel_rts_iou_boot <- nlsBoot(sentinel_rts_iou_nls, 500000)
-# saveRDS(sentinel_rts_iou_nls, './data/models/sentinel_rts_iou_nls.RData')
-# saveRDS(sentinel_rts_iou_boot, './data/models/sentinel_rts_iou_boot.RData')
-
-sentinel_rts_iou_nls <- readRDS('./data/models/sentinel_rts_iou_nls.RData')
-sentinel_rts_iou_boot <- readRDS('./data/models/sentinel_rts_iou_boot.RData')
-summary(sentinel_rts_iou_nls)
+summary(sentinel_iou_nls)
 
 # sentinel_single_rts_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
@@ -1710,11 +1605,11 @@ summary(sentinel_single_rts_iou_nls)
 Table for nls model summaries
 
 ```{r}
-rts_iou_summary <- tidy(maxar_rts_iou_nls) %>%
+rts_iou_summary <- tidy(maxar_iou_nls) %>%
   mutate(Imagery = 'Maxar') %>%
-  rbind(tidy(planet_rts_iou_nls) %>%
+  rbind(tidy(planet_iou_nls) %>%
           mutate(Imagery = 'Planet')) %>%
-  rbind(tidy(sentinel_rts_iou_nls) %>%
+  rbind(tidy(sentinel_iou_nls) %>%
           mutate(Imagery = 'Sentinel-2')) %>%
   mutate(across(estimate:p.value, ~ round(.x, 3)),
          p.value = case_when(p.value == 0 ~ '<0.001',
@@ -1768,15 +1663,6 @@ maxar_iou_ci <- newdata %>%
           as_tibble()) %>%
   select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 
-# maxar_rts_iou_predict <- my_nlsBootPredict(maxar_rts_iou_boot, newdata = newdata, interval = 'prediction')
-# saveRDS(maxar_rts_iou_predict, './data/models/maxar_rts_iou_predict.RData')
-
-maxar_rts_iou_predict <- readRDS('./data/models/maxar_rts_iou_predict.RData')
-maxar_rts_iou_ci <- newdata %>%
-  cbind(maxar_rts_iou_predict %>%
-          as_tibble()) %>%
-  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
-
 # maxar_single_rts_iou_predict <- my_nlsBootPredict(maxar_single_rts_iou_boot, newdata = newdata2, interval = 'prediction')
 # saveRDS(maxar_single_rts_iou_predict, './data/models/maxar_single_rts_iou_predict.RData')
 
@@ -1794,15 +1680,6 @@ maxar_single_rts_iou_ci <- newdata2 %>%
 planet_iou_predict <- readRDS('./data/models/planet_iou_predict.RData')
 planet_iou_ci <- newdata %>%
   cbind(planet_iou_predict %>%
-          as_tibble()) %>%
-  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
-
-# planet_rts_iou_predict <- my_nlsBootPredict(planet_rts_iou_boot, newdata = newdata, interval = 'prediction')
-# saveRDS(planet_rts_iou_predict, './data/models/planet_rts_iou_predict.RData')
-
-planet_rts_iou_predict <- readRDS('./data/models/planet_rts_iou_predict.RData')
-planet_rts_iou_ci <- newdata %>%
-  cbind(planet_rts_iou_predict %>%
           as_tibble()) %>%
   select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 
@@ -1826,15 +1703,6 @@ sentinel_iou_ci <- newdata %>%
           as_tibble()) %>%
   select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 
-# sentinel_rts_iou_predict <- my_nlsBootPredict(sentinel_rts_iou_boot, newdata = newdata, interval = 'prediction')
-# saveRDS(sentinel_rts_iou_predict, './data/models/sentinel_rts_iou_predict.RData')
-
-sentinel_rts_iou_predict <- readRDS('./data/models/sentinel_rts_iou_predict.RData')
-sentinel_rts_iou_ci <- newdata %>%
-  cbind(sentinel_rts_iou_predict %>%
-          as_tibble()) %>%
-  select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
-
 # sentinel_single_rts_iou_predict <- my_nlsBootPredict(sentinel_single_rts_iou_boot, newdata = newdata2, interval = 'prediction')
 # saveRDS(sentinel_single_rts_iou_predict, './data/models/sentinel_single_rts_iou_predict.RData')
 
@@ -1847,7 +1715,7 @@ sentinel_single_rts_iou_ci <- newdata2 %>%
 
 ```{r}
 # Add predictions to `polys`
-mean_iou_predictions <- rbind(
+iou_predictions <- rbind(
   my_nlsBootPredict(maxar_iou_boot, 
                     polys %>%
                       as_tibble() %>%
@@ -1865,32 +1733,11 @@ mean_iou_predictions <- rbind(
                     interval = 'prediction')
   )
 
-rts_iou_predictions <- rbind(
-  my_nlsBootPredict(maxar_rts_iou_boot, 
-                    polys %>%
-                      as_tibble() %>%
-                      filter(imagery == 'Maxar'),
-                    interval = 'prediction'),
-  my_nlsBootPredict(planet_rts_iou_boot, 
-                    polys %>%
-                      as_tibble() %>%
-                      filter(imagery == 'Planet'),
-                    interval = 'prediction'),
-  my_nlsBootPredict(sentinel_rts_iou_boot, 
-                    polys %>%
-                      as_tibble() %>%
-                      filter(imagery == 'Sentinel-2'),
-                    interval = 'prediction')
-  )
-
 polys <- polys %>%
   mutate(
-    mean_iou_pred = mean_iou_predictions[, 1],
-    mean_iou_pred_lwr = mean_iou_predictions[, 2],
-    mean_iou_pred_upr = mean_iou_predictions[, 3],
-    rts_iou_pred = rts_iou_predictions[, 1],
-    rts_iou_pred_lwr = rts_iou_predictions[, 2],
-    rts_iou_pred_upr = rts_iou_predictions[, 3]
+    iou_pred = iou_predictions[, 1],
+    iou_pred_lwr = iou_predictions[, 2],
+    iou_pred_upr = iou_predictions[, 3]
   )
 
 single_rts_iou_predictions <- rbind(
@@ -1922,18 +1769,11 @@ single_rts <- single_rts %>%
 Plot the Size/Performance plot
 
 ```{r}
-mean_iou_ci <- maxar_iou_ci %>%
+iou_ci <- maxar_iou_ci %>%
   mutate(imagery = 'Maxar') %>%
   rbind(planet_iou_ci %>%
           mutate(imagery = 'Planet')) %>%
   rbind(sentinel_iou_ci %>%
-          mutate(imagery = 'Sentinel-2'))
-
-rts_iou_ci <- maxar_rts_iou_ci %>%
-  mutate(imagery = 'Maxar') %>%
-  rbind(planet_rts_iou_ci %>%
-          mutate(imagery = 'Planet')) %>%
-  rbind(sentinel_rts_iou_ci %>%
           mutate(imagery = 'Sentinel-2'))
 
 single_rts_iou_ci <- maxar_single_rts_iou_ci %>%
@@ -1950,33 +1790,18 @@ rm(maxar_iou_nls, maxar_iou_ci, maxar_rts_iou_nls, maxar_rts_iou_ci,
 ```
 
 ```{r}
-ggplot(polys, aes(x = rts_area, y = mean_iou, color = imagery)) +
-  geom_point(size = 1) +
-  geom_ribbon(data = mean_iou_ci,
-            aes(x = rts_area, ymin = lwr, ymax = upr, group = imagery),
-            alpha = 0.2,
-            inherit.aes = FALSE) +
-  geom_line(data = mean_iou_ci, 
-            aes(x = rts_area, y = prediction, color = imagery),
-            inherit.aes = FALSE) +
-  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'Mean IoU',
-                     limits = c(0, 0.93)) +
-  scale_color_manual(values = imagery_colors,
-                     labels = imagery_labels) +
-  theme(legend.title = element_blank())
-
 ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
   geom_point(size = 1) +
-  geom_ribbon(data = rts_iou_ci,
+  geom_ribbon(data = iou_ci,
             aes(x = rts_area, ymin = lwr, ymax = upr, group = imagery),
             alpha = 0.2,
             inherit.aes = FALSE) +
-  geom_line(data = rts_iou_ci, 
+  geom_line(data = iou_ci, 
             aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'RTS IoU') +
+  scale_y_continuous(name = 'RTS IoU',
+                     limits = c(0, 1)) +
   scale_color_manual(values = imagery_colors,
                      labels = imagery_labels) +
   theme(legend.title = element_blank())
@@ -1995,7 +1820,8 @@ ggplot(polys,
             aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'RTS IoU') +
+  scale_y_continuous(name = 'RTS IoU',
+                     limits = c(0, 1)) +
   scale_color_manual(values = imagery_colors,
                      labels = imagery_labels) +
   scale_shape_manual(values = c(16, 1)) +
@@ -2109,9 +1935,9 @@ This approach first uses the 95% CI of the model parameters to determine whether
 ```{r, include = FALSE}
 # take the derivative of the non-linear function to find where the slope approaches 0
 # get parameters from `summary({model})$parameters`
-maxar_d1 <- D(expression(y = 0.7254422 * x / (2123.6825320 + x)), name = 'x')
-planet_d1 <- D(expression(y = 0.6906648 * x / (2498.0072184 + x)), name = 'x')
-sentinel_d1 <- D(expression(y = 0.5895414 * x / (2885.9723242 + x)), name = 'x')
+maxar_d1 <- D(expression(y = 0.8066169 * x / (3110.6944035 + x)), name = 'x')
+planet_d1 <- D(expression(y = 0.7629412 * x / (3980.4699512 + x)), name = 'x')
+sentinel_d1 <- D(expression(y = 0.6648809 * x / (3775.0197095 + x)), name = 'x')
 
 maxar_single_d1 <- D(expression(y = 0.8459141 * x / (3127.1810378 + x)), name = 'x')
 planet_single_d1 <- D(expression(y = 0.7716229 * x / (2744.6832193 + x)), name = 'x')
@@ -2170,46 +1996,6 @@ size_single_thresholds <- tibble(imagery = c('Maxar', 'Planet', 'Sentinel-2'),
                                                    planet_single_cross, 
                                                    sentinel_single_cross))
 
-# plot to confirm
-ggplot(rts_iou_ci, aes(x = rts_area)) +
-  stat_function(fun = function(x) 0.6946343/(237.8842 + x) - 0.6946343 * x/(237.8842 + x)^2) +
-  # geom_line(data = iou_ci, 
-  #           aes(y = d1),
-  #           color = 'gray20') +
-  geom_hline(yintercept = 1e-06,
-             color = 'blue') +
-  geom_vline(xintercept = maxar_cross,
-             color = 'red') +
-  scale_y_continuous(limits = c(9e-07, 1.1e-06)) +
-  scale_x_continuous(limits = c(10000, 15000)) +
-  ggtitle('Maxar')
-
-ggplot(rts_iou_ci, aes(x = rts_area)) +
-  stat_function(fun = function(x) 0.6908137/(297.8871169 + x) - 0.6908137 * x/(297.8871169 + x)^2) +
-  # geom_line(data = iou_ci, 
-  #           aes(y = d1),
-  #           color = 'gray20') +
-  geom_hline(yintercept = 1e-06,
-             color = 'blue') +
-  geom_vline(xintercept = planet_cross,
-             color = 'red') +
-  scale_y_continuous(limits = c(9e-07, 1.1e-06)) +
-  scale_x_continuous(limits = c(10000, 15000)) +
-  ggtitle('Planet')
-
-ggplot(rts_iou_ci, aes(x = rts_area)) +
-  stat_function(fun = function(x) 0.6839025/(250.2487224 + x) - 0.6839025 * x/(250.2487224 + x)^2) +
-  # geom_line(data = iou_ci, 
-  #           aes(y = d1),
-  #           color = 'gray20') +
-  geom_hline(yintercept = 1e-06,
-             color = 'blue') +
-  geom_vline(xintercept = sentinel_cross,
-             color = 'red') +
-  scale_y_continuous(limits = c(9e-07, 1.1e-06)) +
-  scale_x_continuous(limits = c(10000, 15000)) +
-  ggtitle('Sentinel-2')
-
 rm(maxar_d1, planet_d1, sentinel_d1,
    maxar_est, planet_est, sentinel_est,
    maxar_cross, planet_cross, sentinel_cross,
@@ -2244,16 +2030,16 @@ polys <- polys %>%
     ),
     pq_ci = factor(
       case_when(
-        rts_iou > rts_iou_pred_upr & rts_iou > iou_threshold ~ 'High',
-        rts_iou < rts_iou_pred_lwr ~ 'Low',
+        rts_iou > iou_pred_upr & rts_iou > iou_threshold ~ 'High',
+        rts_iou < iou_pred_lwr ~ 'Low',
         TRUE ~ 'Expected'
       ),
       levels = c('High', 'Expected', 'Low')),
     pq_ci_size = factor(
       case_when(
-        rts_iou > rts_iou_pred_upr & rts_iou > iou_threshold & 
+        rts_iou > iou_pred_upr & rts_iou > iou_threshold & 
           rts_area <= size_threshold ~ 'High',
-        rts_iou < rts_iou_pred_lwr & rts_area > size_threshold ~ 'Low',
+        rts_iou < iou_pred_lwr & rts_area > size_threshold ~ 'Low',
         TRUE ~ 'Expected'
       ),
       levels = c('High', 'Expected', 'Low'))
@@ -2319,12 +2105,14 @@ min_rts_area <- single_rts_iou_ci %>%
   left_join(size_single_thresholds %>%
               mutate(rts_threshold = ceiling(rts_threshold/100)*100),
             by = 'imagery') %>%
+  mutate(rts_iou_median = round(rts_iou_median, 2)) %>%
   select(`Imagery` = imagery, 
+         `Median RTS IoU` = rts_iou_median,
          `RTS Area to Exceed Median RTS IoU` = rts_area,
          `RTS Area Threshold Where Slope <1e-05` = rts_threshold)
 
-# write.csv(min_rts_area,
-#           './tables/rts_area_thresholds.csv')
+write.csv(min_rts_area,
+          './tables/rts_area_thresholds.csv')
 
 knitr::kable(min_rts_area)
 ```
@@ -2337,12 +2125,12 @@ ggplot(polys,
   scale_color_manual(name = 'Prediction Quality',
                      values = pq_colors) +
   new_scale('color') +
-  geom_ribbon(data = rts_iou_ci,
+  geom_ribbon(data = iou_ci,
               aes(x = rts_area, ymin = lwr, ymax = upr),
               fill = 'gray50',
               alpha = 0.2,
               inherit.aes = FALSE) +
-  geom_line(data = rts_iou_ci, 
+  geom_line(data = iou_ci, 
             aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   scale_color_manual(name = 'Imagery',
@@ -2371,14 +2159,14 @@ ggplot(polys,
   scale_color_manual(name = 'Prediction Quality',
                      values = pq_colors) +
   new_scale('color') +
-  geom_ribbon(data = rts_iou_ci,
+  geom_ribbon(data = iou_ci,
               aes(x = rts_area, 
                   ymin = lwr, 
                   ymax = upr),
               fill = 'gray50',
               alpha = 0.2,
               inherit.aes = FALSE) +
-  geom_line(data = rts_iou_ci,
+  geom_line(data = iou_ci,
             aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
   geom_vline(data = size_thresholds,
@@ -2543,7 +2331,7 @@ input_data <- input_data %>%
   left_join(polys %>%
               as_tibble() %>%
               select(id, imagery, yg, rts_area, rts_shape, rts_iou, mean_iou, 
-                     mean_iou_v2, pq_ci, pq_ci_size, pq_ci_offset),
+                     mean_iou_v2, pq_ci, pq_ci_size),
             by = c('id', 'imagery'))
 ```
 
