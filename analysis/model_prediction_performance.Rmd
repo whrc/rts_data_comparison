@@ -9,8 +9,7 @@ output:
 ## TODO:
 
 -   Figure out why some features of interest seem to only be half of the RTS (is this a general vs. active issue?) (4a, 4e, 4f, 67, 68)
--   Calculate size needed to exceed IoU of 0.5 for each imagery type
--   Add general and active IoU's to table
+-   ID 17 looks like the ground truth outline might be offset from all three imagery products
 -   Start picking figures to include in manuscript!
 -   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
 
@@ -451,16 +450,16 @@ plot_prediction <- function(pid) {
               linewidth = 0.5) +
       scale_color_manual(name = '',
                          values = c('gray90')) +
-      # new_scale('color') +
-      # geom_sf(aes(geometry = pred_geometry,
-      #         color = pq_ci_size),
-      #         fill = 'transparent',
-      #         linewidth = 0.5) +
-      # scale_color_manual(name = 'Prediction\n(Quality)',
-      #                    breaks = pq_labels,
-      #                    labels = pq_labels,
-      #                    values = pq_colors,
-      #                    drop = FALSE) +
+      new_scale('color') +
+      geom_sf(aes(geometry = pred_geometry,
+              color = pq_ci_size),
+              fill = 'transparent',
+              linewidth = 0.5) +
+      scale_color_manual(name = 'Prediction\n(Quality)',
+                         breaks = pq_labels,
+                         labels = pq_labels,
+                         values = pq_colors,
+                         drop = FALSE) +
       new_scale('color') +
       geom_sf(aes(geometry = rts_geometry,
               color = 'Feature of Interest'),
@@ -470,15 +469,15 @@ plot_prediction <- function(pid) {
       scale_color_manual(name = '',
                          values = 'green',
                          drop = FALSE) +
-      # new_scale('color') +
-      # geom_sf(aes(geometry = mask_geometry,
-      #         color = 'AOI'),
-      #         fill = 'transparent',
-      #         linewidth = 0.5,
-      #         linetype = 'dashed') +
-      # scale_color_manual(name = '',
-      #                    values = 'purple',
-      #                    drop = FALSE) +
+      new_scale('color') +
+      geom_sf(aes(geometry = mask_geometry,
+              color = 'AOI'),
+              fill = 'transparent',
+              linewidth = 0.5,
+              linetype = 'dashed') +
+      scale_color_manual(name = '',
+                         values = 'purple',
+                         drop = FALSE) +
       facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('RTS IoU:', round(rts_iou, 2))) +
       theme(axis.title = element_blank(),
             axis.text = element_blank(),
@@ -498,6 +497,7 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     y_var == 'g_mean' ~ "expression('Green')",
     y_var == 'b_mean' ~ "expression('Blue')",
     y_var == 'lum_mean' ~ "expression('Luminance')",
+    y_var == 'nir_mean' ~ "expression('NIR')",
     y_var == 'ndvi_mean' ~ "expression('NDVI')",
     y_var == 'ndwi_mean' ~ "expression('NDWI')",
     y_var == 'elev_mean' ~ "expression('Relative Elevation')",
@@ -506,6 +506,7 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     y_var == 'g_sd' ~ "expression(sigma ~ 'Green')",
     y_var == 'b_sd' ~ "expression(sigma ~ 'Blue')",
     y_var == 'lum_sd' ~ "expression(sigma ~ 'Luminance')",
+    y_var == 'nir_sd' ~ "expression(sigma ~ 'NIR')",
     y_var == 'ndvi_sd' ~ "expression(sigma ~ 'NDVI')",
     y_var == 'ndwi_sd' ~ "expression(sigma ~ 'NDWI')",
     y_var == 'elev_sd' ~ "expression(sigma ~ 'Relative Elevation')",
@@ -1061,39 +1062,6 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.s
     rts_shape = as.numeric(4*pi*st_area(geometry)/st_perimeter(geometry)^2) # calculate Polsby-Popper value (shape compactness/roundness)
     )  %>%
   filter(id %in% pred_ids)
-
-rts_outlines_new <- st_read('./data/rts_polygons/rts_polygons_for_Yili_Jan_2023.shp') %>%
-  st_transform(crs = 3413) %>%
-  select(id = ID, status = Act_or_Gen, code_id, rts_area = Shape_Area, 
-         Long) %>%
-  mutate(
-    rts_shape = as.numeric(4*pi*st_area(geometry)/st_perimeter(geometry)^2)
-    )# %>%
-  # filter(id %in% pred_ids)
-```
-
-```{r}
-test <- rts_outlines %>%
-  filter(id == "0000000000000000004a")
-
-test2 <- rts_outlines_new %>%
-  filter(as.vector(st_intersects(test, sparse = FALSE)))
-```
-
-```{r}
-walk(
-  pred_ids,
-  ~ print(ggplot() +
-            geom_sf(data = rts_outlines %>%
-                      filter(id == .x), 
-                    aes(geometry = geometry),
-                    color = 'black', fill = 'transparent') +
-            geom_sf(data = rts_outlines_new %>%
-                      filter(id == .x), 
-                    aes(geometry = geometry),
-                    color = 'red', fill = 'transparent') +
-            ggtitle(paste('ID:', .x)))
-  )
 ```
 
 
@@ -1343,7 +1311,7 @@ leaflet() %>%
 
 ## IoU
 
-### Calculate Intersection and Union
+### Calculate IoU
 
 ```{r}
 polys <- polys %>%
@@ -1364,8 +1332,6 @@ polys <- polys %>%
                                           ~ st_union(...)),
                                   crs = crs(polys)))
 ```
-
-### Calculate IoU
 
 IoU (Calculated in Model)
 
@@ -1398,6 +1364,8 @@ iou <- polys %>%
   select(Imagery = imagery, `RTS IoU` = rts_iou, `Val IoU` = mean_iou, `Val IoU (remove zeros)` = mean_iou_v2)
 knitr::kable(iou, caption = 'IoU (Calculated Directly from Predictions)')
 ```
+
+### Plot
 
 ```{r, fig.width = 4, fig.height = 4}
 imagery_performance_summary <- polys %>%
@@ -1556,9 +1524,7 @@ rts_summaries <- polys %>%
 knitr::kable(rts_summaries)
 ```
 
-### Plot
-
-Raw IoU Scores:
+### `nls` Models
 
 Run `nls` models and bootstrap parameters
 
@@ -1673,6 +1639,8 @@ sentinel_iou_ci <- newdata %>%
   select(rts_area, prediction = Median, lwr = `25%`, upr = `75%`)
 ```
 
+Add predictions to `polys` to use in prediction quality calculation
+
 ```{r}
 # Add predictions to `polys`
 iou_predictions <- rbind(
@@ -1701,7 +1669,7 @@ polys <- polys %>%
   )
 ```
 
-Plot the Size/Performance plot
+### Plot
 
 ```{r}
 iou_ci <- maxar_iou_ci %>%
@@ -1711,10 +1679,7 @@ iou_ci <- maxar_iou_ci %>%
   rbind(sentinel_iou_ci %>%
           mutate(imagery = 'Sentinel-2'))
 
-rm(maxar_iou_nls, maxar_iou_ci,
-   planet_iou_nls, planet_iou_ci, 
-   sentinel_iou_nls, sentinel_iou_ci, 
-   newdata, mean_iou_predictions, rts_iou_predictions)
+rm(maxar_iou_ci, planet_iou_ci, sentinel_iou_ci, newdata)
 ```
 
 ```{r}
@@ -1816,9 +1781,9 @@ This approach first uses the 95% CI of the model parameters to determine whether
 ```{r, include = FALSE}
 # take the derivative of the non-linear function to find where the slope approaches 0
 # get parameters from `summary({model})$parameters`
-maxar_d1 <- D(expression(y = 0.8066169 * x / (3110.6944035 + x)), name = 'x')
-planet_d1 <- D(expression(y = 0.7629412 * x / (3980.4699512 + x)), name = 'x')
-sentinel_d1 <- D(expression(y = 0.6648809 * x / (3775.0197095 + x)), name = 'x')
+maxar_d1 <- D(expression(y = 0.8064456 * x / (3089.6118432 + x)), name = 'x')
+planet_d1 <- D(expression(y = 0.7622447 * x / (3940.7125511 + x)), name = 'x')
+sentinel_d1 <- D(expression(y = 0.6637391 * x / (3750.5895223 + x)), name = 'x')
 
 # estimate where the derivative crosses 1e-05
 estimate_grid <- tibble(rts_area = seq(10000, 70000, by = 0.1))
@@ -1904,23 +1869,31 @@ min_rts_area <- iou_ci %>%
   left_join(polys %>%
               as_tibble() %>%
               summarise(rts_iou_median = median(rts_iou), 
-                        .by = c('imagery')) %>%
+                        .by = imagery) %>%
               select(imagery, rts_iou_median),
             by = 'imagery') %>%
   filter(abs(prediction - rts_iou_median) == min(abs(prediction - rts_iou_median)),
-         .by = 'imagery') %>%
-  left_join(size_single_thresholds %>%
+         .by = imagery) %>%
+  left_join(size_thresholds %>%
               mutate(rts_threshold = ceiling(rts_threshold/100)*100),
             by = 'imagery') %>%
   mutate(rts_iou_median = round(rts_iou_median, 2),
-         rts_area = ceiling(rts_area/100)*100) %>%
+         rts_area_exceed_median = ceiling(rts_area/100)*100) %>%
+  select(-rts_area) %>%
+  left_join(iou_ci %>%
+              filter(prediction > 0.5, .by = imagery) %>%
+              summarise(rts_area = first(rts_area), 
+                        .by = imagery),
+            by = 'imagery') %>%
+  mutate(rts_area_exceed_0.5 = ceiling(rts_area/100)*100) %>%
   select(`Imagery` = imagery, 
          `Median RTS IoU` = rts_iou_median,
-         `RTS Area to Exceed Median RTS IoU` = rts_area,
-         `RTS Area Threshold Where Slope <1e-05` = rts_threshold)
+         `RTS Area to Exceed Median RTS IoU` = rts_area_exceed_median,
+         `RTS Area Threshold Where Slope <1e-05` = rts_threshold,
+         `RTS Area to Exceed 0.5` = rts_area_exceed_0.5)
 
-write.csv(min_rts_area,
-          './tables/rts_area_thresholds.csv')
+# write.csv(min_rts_area,
+#           './tables/rts_area_thresholds.csv')
 
 knitr::kable(min_rts_area)
 ```
@@ -1989,57 +1962,8 @@ ggplot(polys,
   # coord_cartesian(ylim = c(0, 1)) +
   facet_grid(. ~ imagery)
 ```
-```{r, fig.width = 12}
-ggplot(single_rts, 
-       aes(x = rts_area, 
-           y = rts_iou)) +
-  geom_point(data = polys %>%
-               filter(st_geometry_type(val_geometry) == 'MULTIPOLYGON'),
-             aes(x = rts_area, 
-                 y = rts_iou,
-             color = 'Multiple RTS Features\n(not included)'),
-             size = 1,
-             shape = 16,
-             inherit.aes = FALSE) +
-  scale_color_manual(name = '', values = 'gray') +
-  new_scale('color') +
-  geom_point(aes(color = pq_ci, shape = yg)) +
-  scale_color_manual(name = 'Prediction Quality',
-                     values = pq_colors) +
-  new_scale('color') +
-  geom_ribbon(data = single_rts_iou_ci,
-              aes(x = rts_area, ymin = lwr, ymax = upr),
-              fill = 'gray50',
-              alpha = 0.2,
-              inherit.aes = FALSE) +
-  geom_line(data = single_rts_iou_ci, 
-            aes(x = rts_area, y = prediction, color = imagery),
-            inherit.aes = FALSE) +
-  # geom_vline(data = size_single_thresholds,
-  #            aes(xintercept = rts_threshold, color = imagery),
-  #           linetype = 'dashed') +
-  scale_color_manual(name = 'Imagery',
-                     values = imagery_colors) +
-  scale_color_manual(name = 'Imagery',
-                     values = imagery_colors) +
-  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'RTS IoU',
-                     limits = c(0, 1.02)) +
-  scale_shape_manual(name = 'Region',
-                     values = c(16, 1)) +
-  facet_grid(. ~ imagery) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-
-# ggsave('./figures/area_iou.pdf',
-#        height = 4.5,
-#        width = 6.5)
-# ggsave('./figures/area_iou.jpg',
-#        height = 4.5,
-#        width = 6.5)
-```
 
 ```{r}
-knitr::kable(size_thresholds)
 knitr::kable(polys %>%
                as_tibble() %>%
                count(imagery, pq_ci) %>%
@@ -2058,46 +1982,59 @@ polys <- polys %>%
       )
     )
 
+# set plotting order
 rts_pq <- polys %>%
   as_tibble() %>%
-  select(id, imagery, rts_area, name_long, pq_ci) %>%
+  select(id, imagery, pq_ci) %>%
   mutate(
     pq_ci_high = case_when(pq_ci == 'High' ~ 1,
-                                TRUE ~ 0),
+                           TRUE ~ 0),
+    imagery_high = case_when(pq_ci_high == 1 ~ imagery,
+                             TRUE ~ NA),
     pq_ci_expected = case_when(pq_ci == 'Expected' ~ 1,
-                                    TRUE ~ 0),
+                               TRUE ~ 0),
+    imagery_expected = case_when(pq_ci_expected == 1 ~ imagery,
+                             TRUE ~ NA),
     pq_ci_low = case_when(pq_ci == 'Low' ~ 1,
-                               TRUE ~ 0)
+                          TRUE ~ 0),
+    imagery_low = case_when(pq_ci_low == 1 ~ imagery,
+                             TRUE ~ NA)
   ) %>%
-  group_by(id) %>%
   summarise(High = sum(pq_ci_high),
+            imagery_high = str_flatten(imagery_high, collapse = ', ', na.rm = TRUE),
             Expected = sum(pq_ci_expected),
-            Low = sum(pq_ci_low)) %>%
-  pivot_longer(High:Low, 
-               names_to = 'pq_ci', 
-               values_to = 'n') %>%
-  group_by(id) %>%
+            imagery_expected = str_flatten(imagery_expected, collapse = ', ', na.rm = TRUE),
+            Low = sum(pq_ci_low),
+            imagery_low = str_flatten(imagery_low, collapse = ', ', na.rm = TRUE),
+            .by = id) %>%
+  mutate(max_n = max(c(High, Expected, Low)),
+         .by = id) %>%
   mutate(
-    pq_ci = factor(pq_ci,
-                        levels = c('High', 'Expected', 'Low')),
-    group_max = max(n),
-    group_pq_max = pq_ci[which(n == max(n))]
-  ) %>%
-  ungroup() %>%
-  mutate(
-    group_pq_2nd = case_when(
-      n == 1 ~ pq_ci,
-      TRUE ~ NA
-      ),
     plotting_order = case_when(
-      group_max == 2 & group_pq_max == 'High' & group_pq_2nd == 'Low' ~ 1,
-      group_max == 3 & group_pq_max == 'High' ~ 2,
-      group_max == 2 & group_pq_max == 'High' & group_pq_2nd == 'Expected' ~ 3,
-      group_max == 2 & group_pq_max == 'Expected' & group_pq_2nd == 'High' ~ 4,
-      group_max == 3 & group_pq_max == 'Expected' ~ 5,
-      group_max == 2 & group_pq_max == 'Expected' & group_pq_2nd == 'Low' ~ 6,
-      group_max == 2 & group_pq_max == 'Low' & group_pq_2nd == 'Expected' ~ 7,
-      group_max == 3 & group_pq_max == 'Low' ~ 8
+      High == 2 & Low == 1 & imagery_low == 'Maxar' ~ 1,
+      High == 2 & Low == 1 & imagery_low == 'Planet' ~ 2,
+      High == 2 & Low == 1 & imagery_low == 'Sentinel-2' ~ 3,
+      High == 3 ~ 4,
+      High == 2 & Expected == 1 & imagery_expected == 'Maxar' ~ 5,
+      High == 2 & Expected == 1 & imagery_expected == 'Planet' ~ 6,
+      High == 2 & Expected == 1 & imagery_expected == 'Sentinel-2' ~ 7,
+      Expected == 2 & High == 1 & imagery_high == 'Maxar' ~ 8,
+      Expected == 2 & High == 1 & imagery_high == 'Planet' ~ 9,
+      Expected == 2 & High == 1 & imagery_high == 'Sentinel-2' ~ 10,
+      Expected == 3 ~ 11,
+      Expected == 2 & Low == 1 & imagery_low == 'Maxar' ~ 12,
+      Expected == 2 & Low == 1 & imagery_low == 'Planet' ~ 13,
+      Expected == 2 & Low == 1 & imagery_low == 'Sentinel-2' ~ 14,
+      Low == 2 & Expected == 1 & imagery_expected == 'Maxar' ~ 15,
+      Low == 2 & Expected == 1 & imagery_expected == 'Planet' ~ 16,
+      Low == 2 & Expected == 1 & imagery_expected == 'Sentinel-2' ~ 17,
+      Low == 3 ~ 18,
+      Low == 2 & High == 1 & imagery_high == 'Maxar' ~ 19,
+      Low == 2 & High == 1 & imagery_high == 'Planet' ~ 20,
+      Low == 2 & High == 1 & imagery_high == 'Sentinel-2' ~ 21,
+      max_n == 1 & imagery_low == 'Maxar' ~ 22,
+      max_n == 1 & imagery_low == 'Planet' ~ 23,
+      max_n == 1 & imagery_low == 'Sentinel-2' ~ 24
     )
   ) %>%
   arrange(plotting_order, id) %>%
@@ -2114,21 +2051,21 @@ ggplot(polys,
        aes(x = id, y = pq_ci_offset, color = imagery)) +
   geom_point() +
   scale_y_reverse(name = 'Prediction Quality',
-                     breaks = c(1, 2, 3),
-                     labels = pq_labels) +
+                  breaks = c(1, 2, 3),
+                  labels = pq_labels) +
   scale_x_discrete(name = 'RTS Features') +
   scale_color_manual(values = imagery_colors) +
   # facet_grid(name_long ~ ., scales = 'free_y') +
   theme(axis.text.x = element_blank(),
         legend.title = element_blank(),
-        panel.grid.minor = element_blank()) +
-  coord_fixed(ratio = 10)
+        panel.grid.major.y = element_blank()) +
+  coord_fixed(ratio = 7)
 
 # ggsave('./figures/prediction_quality_by_imagery.pdf',
-#        height = 2.5,
+#        height = 2,
 #        width = 6.5)
 # ggsave('./figures/prediction_quality_by_imagery.jpg',
-#        height = 2.5,
+#        height = 2,
 #        width = 6.5)
 ```
 
@@ -2147,10 +2084,10 @@ input_data <- input_data %>%
 ```{r}
 zonal_stats <- input_data %>%
   filter(mask == 1) %>%
-  group_by(imagery, id, yg, rts_class, rts_area, rts_shape, rts_iou, mean_iou, 
-           mean_iou_v2, pq_ci, pq_ci_size) %>%
   summarise(across(c(prediction, r:sr), mean, .names = "{.col}_mean"),
-            across(r:sr, sd, .names = "{.col}_sd")) %>%
+            across(r:sr, sd, .names = "{.col}_sd"),
+            .by = c(imagery, id, yg, rts_class, rts_area, rts_shape, rts_iou, 
+                    mean_iou, mean_iou_v2, pq_ci, pq_ci_size)) %>%
   pivot_wider(names_from = 'rts_class', 
               values_from = c(prediction_mean:sr_sd)) %>%
   mutate(r_mean_delta = (r_mean_rts - r_mean_bg),
@@ -2171,7 +2108,7 @@ zonal_stats <- input_data %>%
          ndwi_sd_delta = (ndwi_sd_rts - ndwi_sd_bg),
          elev_sd_delta = (elev_sd_rts - elev_sd_bg),
          sr_sd_delta = (sr_sd_rts - sr_sd_bg)) %>%
-  pivot_longer(r_mean_rts:sr_sd_delta, 
+  pivot_longer(r_mean_bg:sr_sd_delta, 
                names_to = 'variable', 
                values_to = 'value') %>%
   separate(variable, 
@@ -2221,18 +2158,18 @@ zonal_stats_contrasts <- lm_output %>%
 zonal_stats_limits <- zonal_stats %>%
   select(imagery:sr_sd, pq_ci) %>%
   pivot_longer(r_mean:sr_sd,  names_to = 'variable', values_to = 'value') %>%
-group_by(imagery, pq_ci, rts_class, variable) %>%
   summarise(
     # lwr = min(trim_outliers(value), na.rm = TRUE), # use this if removing outliers from plots
     # upr = max(trim_outliers(value), na.rm = TRUE),
     lwr = min(value, na.rm = TRUE),
-    upr = max(value, na.rm = TRUE)
+    upr = max(value, na.rm = TRUE),
+    .by = c(imagery, pq_ci, rts_class, variable)
     ) %>%
   mutate(lim_lwr = upr - (upr - lwr)*1.05,
          lim_upr = lwr + (upr - lwr)*1.05) %>%
-  group_by(variable, rts_class) %>%
   summarise(lwr = min(lim_lwr),
-            upr = max(lim_upr))
+            upr = max(lim_upr),
+            .by = c(variable, rts_class))
 ```
 
 ```{r}
@@ -2337,7 +2274,9 @@ rts_labeller <- as_labeller(c(Maxar = 'Maxar', Planet = 'Planet', `Sentinel-2` =
 NIR/NDVI
 
 ```{r}
-ggplot(input_data, aes(x = nir, y = prediction)) +
+ggplot(input_data %>%
+         filter(mask == 1), 
+       aes(x = nir, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
@@ -2350,7 +2289,9 @@ ggplot(input_data, aes(x = nir, y = prediction)) +
   facet_grid(rts_class ~ imagery,
              labeller = rts_labeller)
 
-ggplot(input_data, aes(x = ndvi, y = prediction)) +
+ggplot(input_data %>%
+         filter(mask == 1), 
+       aes(x = ndvi, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
@@ -2387,7 +2328,7 @@ ggplot(input_data, aes(x = ndvi, y = prediction)) +
 
 ```{r}
 ggplot(input_data %>%
-         filter(imagery == 'Maxar'), 
+         filter(mask == 1 & imagery == 'Maxar'), 
        aes(x = nir, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2402,7 +2343,7 @@ ggplot(input_data %>%
   ggtitle('Maxar')
 
 ggplot(input_data %>%
-         filter(imagery == 'Planet'), 
+         filter(mask == 1 & imagery == 'Planet'), 
        aes(x = nir, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2417,7 +2358,7 @@ ggplot(input_data %>%
   ggtitle('Planet')
 
 ggplot(input_data %>%
-         filter(imagery == 'Sentinel-2'), 
+         filter(mask == 1 & imagery == 'Sentinel-2'), 
        aes(x = nir, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2432,7 +2373,7 @@ ggplot(input_data %>%
   ggtitle('Sentinel-2')
 
 ggplot(input_data %>%
-         filter(imagery == 'Maxar'), 
+         filter(mask == 1 & imagery == 'Maxar'), 
        aes(x = ndvi, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2447,7 +2388,7 @@ ggplot(input_data %>%
   ggtitle('Maxar')
 
 ggplot(input_data %>%
-         filter(imagery == 'Planet'), 
+         filter(mask == 1 & imagery == 'Planet'), 
        aes(x = ndvi, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2462,7 +2403,7 @@ ggplot(input_data %>%
   ggtitle('Planet')
 
 ggplot(input_data %>%
-         filter(imagery == 'Sentinel-2'), 
+         filter(mask == 1 & imagery == 'Sentinel-2'), 
        aes(x = ndvi, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2480,7 +2421,9 @@ ggplot(input_data %>%
 NDWI
 
 ```{r}
-ggplot(input_data, aes(x = ndwi, y = prediction)) +
+ggplot(input_data %>%
+         filter(mask == 1), 
+       aes(x = ndwi, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
@@ -2497,7 +2440,9 @@ ggplot(input_data, aes(x = ndwi, y = prediction)) +
 Elevation
 
 ```{r}
-ggplot(input_data, aes(x = elev, y = prediction)) +
+ggplot(input_data %>%
+         filter(mask == 1), 
+       aes(x = elev, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
@@ -2514,7 +2459,9 @@ ggplot(input_data, aes(x = elev, y = prediction)) +
 Others
 
 ```{r}
-ggplot(input_data, aes(x = r, y = prediction)) +
+ggplot(input_data %>%
+         filter(mask == 1), 
+       aes(x = r, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
@@ -2527,7 +2474,9 @@ ggplot(input_data, aes(x = r, y = prediction)) +
   facet_grid(rts_class ~ imagery,
              labeller = rts_labeller)
 
-ggplot(input_data, aes(x = g, y = prediction)) +
+ggplot(input_data %>%
+         filter(mask == 1), 
+       aes(x = g, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
@@ -2540,7 +2489,9 @@ ggplot(input_data, aes(x = g, y = prediction)) +
   facet_grid(rts_class ~ imagery,
              labeller = rts_labeller)
 
-ggplot(input_data, aes(x = b, y = prediction)) +
+ggplot(input_data %>%
+         filter(mask == 1), 
+       aes(x = b, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
@@ -2553,7 +2504,9 @@ ggplot(input_data, aes(x = b, y = prediction)) +
   facet_grid(rts_class ~ imagery,
              labeller = rts_labeller)
 
-ggplot(input_data, aes(x = sr, y = prediction)) +
+ggplot(input_data %>%
+         filter(mask == 1), 
+       aes(x = sr, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
                       low = '#CCCCCC',
@@ -2950,7 +2903,7 @@ pq_rf <- randomForest::randomForest(pq_ci ~ .,
                       data = zonal_stats %>%
                         as_tibble() %>%
                         select(-c(id, rts_iou, mean_iou, mean_iou_v2, 
-                                  pq_ci_size, pq_ci_offset, prediction_mean_rts,
+                                  pq_ci_size, prediction_mean_rts,
                                   prediction_mean_bg)) %>%
                         mutate(rts_class = case_when(
                           rts_class == 'RTS' ~ 'rts',
@@ -3179,16 +3132,16 @@ The one really large RTS that was poorly predicted in Planet and Sentinel models
 ```{r}
 rts_id <- polys %>%
   as_tibble() %>%
-  filter(rts_area > size_threshold & pq_ci == 'Low') %>%
+  filter(rts_area > 100000 & pq_ci == 'Low') %>%
   select(id) %>%
   mutate(id = as.character(id)) %>%
   pull(id) %>%
   unique()
 
 ggplot(data = polys %>%
-         filter(id == rts_id)) +
+         filter(id == rts_id[1])) +
   geom_raster(data = input_data %>%
-                filter(id == rts_id),
+                filter(id == rts_id[1]),
               aes(x = x, y = y, fill = color_hex),
               inherit.aes = FALSE) +
   scale_fill_manual(breaks = levels(input_data$color_hex),
@@ -3206,6 +3159,32 @@ new_scale('color') +
           linewidth = 0.5) +
   scale_color_manual(name = '',
                      values = pq_colors[2:3]) +
+  facet_grid(imagery ~ .) +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+ggplot(data = polys %>%
+         filter(id == rts_id[2])) +
+  geom_raster(data = input_data %>%
+                filter(id == rts_id[2]),
+              aes(x = x, y = y, fill = color_hex),
+              inherit.aes = FALSE) +
+  scale_fill_manual(breaks = levels(input_data$color_hex),
+                    values = levels(input_data$color_hex),
+                    guide = 'none') +
+  geom_sf(aes(geometry = val_geometry,
+              color = 'Validation'),
+          fill = 'transparent',
+          linewidth = 0.5) +
+  scale_color_manual(values = c('gray90')) +
+new_scale('color') +
+  geom_sf(aes(geometry = pred_geometry,
+              color = pq_ci),
+          fill = 'transparent',
+          linewidth = 0.5) +
+  scale_color_manual(name = '',
+                     values = pq_colors) +
   facet_grid(imagery ~ .) +
   theme(axis.title = element_blank(),
         axis.text = element_blank(),
