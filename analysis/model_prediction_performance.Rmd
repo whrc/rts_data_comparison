@@ -8,7 +8,7 @@ output:
 
 ## TODO:
 
--   Figure out why some features of interest seem to only be half of the RTS (is this a general vs. active issue?) (4a, 4e, 4f, 67, 68)
+-   Figure out what to do with the disagreeing RTS outlines in the shapefile vs. the raster input data (4a, 4e, 4f, 67, 68, 89). It looks like the general outline was used in all tiles, regardless of whether or not the vector polygon from the shapefile was the active or general outline. Also figure out where the general outline used for the RTSLabel layer came from for 4a, 67, and 68.
 -   ID 17 looks like the ground truth outline might be offset from all three imagery products
 -   Start picking figures to include in manuscript!
 -   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
@@ -423,8 +423,9 @@ plot_prediction <- function(pid) {
   # get polygon data
   current_data <- polys %>%
     filter(id == pid) %>%
-    select(imagery, id, rts_iou, pq_ci, pq_ci_size, bbox_geometry, 
-           mask_geometry, rts_geometry, val_geometry, pred_geometry)
+    select(imagery, id, status, rts_iou, pq_ci, pq_ci_size, bbox_geometry, 
+           mask_geometry, rts_geometry, val_geometry, pred_geometry) %>%
+    mutate(status = factor(status, levels = c('Active', 'General')))
 
   # prep RGB data
   current_rgb <- input_data %>%
@@ -462,12 +463,12 @@ plot_prediction <- function(pid) {
                          drop = FALSE) +
       new_scale('color') +
       geom_sf(aes(geometry = rts_geometry,
-              color = 'Feature of Interest'),
+              color = status),
               fill = 'transparent',
               linewidth = 0.5,
               linetype = 'dashed') +
-      scale_color_manual(name = '',
-                         values = 'green',
+      scale_color_manual(name = 'Feature of Interest',
+                         values = c('blue', 'green'),
                          drop = FALSE) +
       new_scale('color') +
       geom_sf(aes(geometry = mask_geometry,
@@ -999,21 +1000,32 @@ maxar_pred_files_zscore <- list.files(maxar_pred_filepath_zscore,
 maxar_preds <- map(maxar_pred_files, ~ import_pred(.x))
 maxar_preds_zscore <- map(maxar_pred_files_zscore, ~ import_pred(.x))
 
+pred_ids <- map(maxar_preds, ~ get_rast_id(.x))
+
+### Remove this if we figure out the Active vs. General Duplicates
+indices <- which(
+    !(pred_ids %in% c("0000000000000000004a",
+                      "0000000000000000004e", 
+                      "0000000000000000004f",
+                      "00000000000000000067",
+                      "00000000000000000068",
+                      "00000000000000000089"))
+    )
+pred_ids <- pred_ids[indices]
+
+maxar_preds <- maxar_preds[indices]
+maxar_preds_zscore <- maxar_preds_zscore[indices]
+
 rm(maxar_pred_files)
 ```
 
 ```{r, include = FALSE}
-pred_ids <- c()
-for (pred in maxar_preds) {
-  pred_ids <- c(pred_ids, get_rast_id(pred))
-}
-
 maxar_input <- map(maxar_input_files, ~ rast(.x))
 ids <- map_chr(maxar_input, ~ get_rast_id(.x))
 names(maxar_input) <- ids
 
 maxar_input <- filter_input_data(maxar_input, pred_ids)
-rm(maxar_input_files)
+rm(maxar_input_files, ids)
 ```
 
 
@@ -1021,6 +1033,8 @@ rm(maxar_input_files)
 
 ```{r, include = FALSE}
 planet_preds <- map(planet_pred_files, ~ import_pred(.x))
+
+planet_preds <- planet_preds[indices]
 
 rm(planet_pred_files)
 ```
@@ -1031,13 +1045,15 @@ ids <- map_chr(planet_input, ~ get_rast_id(.x))
 names(planet_input) <- ids
 
 planet_input <- filter_input_data(planet_input, pred_ids)
-rm(planet_input_files)
+rm(planet_input_files, ids)
 ```
 
 ### Sentinel GeoTiffs
 
 ```{r, include = FALSE}
 sentinel_preds <- map(sentinel_pred_files, ~ import_pred(.x))
+
+sentinel_preds <- sentinel_preds[indices]
 
 rm(sentinel_pred_files)
 ```
@@ -1048,7 +1064,7 @@ ids <- map_chr(sentinel_input, ~ get_rast_id(.x))
 names(sentinel_input) <- ids
 
 sentinel_input <- filter_input_data(sentinel_input, pred_ids)
-rm(sentinel_input_files)
+rm(sentinel_input_files, ids)
 ```
 
 ### Polygons
@@ -3275,6 +3291,13 @@ Visualize the RTS predictions
 ```{r fig.width = 12, fig.height = 4.8}
 walk(pred_ids,
     ~ plot_prediction(.x))
+```
+
+```{r}
+gen_vs_act_tiles <- tibble(`Active(?)` = c('4a', '4e', '4f', '67', '68', '89'),
+                           `General(?)` = c('??', '28', '2c', '??', '??', '7f'))
+
+knitr::kable(gen_vs_act_tiles, align = 'cc')
 ```
 
 Maxar High Quality Predictions
