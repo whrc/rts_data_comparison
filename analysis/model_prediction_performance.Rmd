@@ -426,64 +426,74 @@ plot_prediction <- function(pid) {
     select(imagery, id, status, rts_iou, pq_ci, pq_ci_size, bbox_geometry, 
            mask_geometry, rts_geometry, val_geometry, pred_geometry) %>%
     mutate(status = factor(status, levels = c('Active', 'General')))
-
+  
   # prep RGB data
   current_rgb <- input_data %>%
     filter(id == pid) %>%
     full_join(current_data %>%
                 select(id, imagery, rts_iou),
               by = c('imagery', 'id', 'rts_iou'))
+  
+  figure <- ggplot(data = current_data) +
+    geom_raster(data = current_rgb,
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation'),
+            fill = 'transparent',
+            linewidth = 0.25) +
+    scale_color_manual(name = '',
+                       values = c('gray90'),
+                       guide = guide_legend(order = 4)) +
+    new_scale('color') +
+    geom_sf(aes(geometry = rts_geometry,
+                color = 'Feature of Interest'),
+            fill = 'transparent',
+            linewidth = 0.25,
+            linetype = 'dashed') +
+    scale_color_manual(name = '',
+                       values = c('green'),
+                       drop = FALSE,
+                       guide = guide_legend(order = 2)) +
+    new_scale('color') +
+    geom_sf(aes(geometry = mask_geometry,
+                color = 'Feature Mask'),
+            fill = 'transparent',
+            linewidth = 0.25,
+            linetype = 'dashed') +
+    scale_color_manual(name = '',
+                       values = 'gray70',
+                       drop = FALSE,
+                       guide = guide_legend(order = 3)) +
+    new_scale('color') +
+    geom_sf(aes(geometry = pred_geometry,
+                color = pq_ci_size),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = 'Prediction\n(Quality)',
+                       breaks = pq_labels,
+                       labels = pq_labels,
+                       values = pq_colors,
+                       drop = FALSE,
+                       guide = guide_legend(order = 1, nrow = 3)) +
+    facet_grid(
+      paste('ID:', str_remove(id, "^0+")) ~ 
+        imagery + paste('RTS IoU:', round(rts_iou, 2))
+      ) +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          legend.position = 'bottom')
 
-  print(
-    ggplot(data = current_data) +
-      geom_raster(data = current_rgb,
-                  aes(x = x, y = y, fill = color_hex),
-                  inherit.aes = FALSE) +
-      scale_fill_manual(breaks = levels(input_data$color_hex),
-                        values = levels(input_data$color_hex),
-                        guide = 'none') +
-      geom_sf(aes(geometry = bbox_geometry),
-              color = 'black',
-              fill = 'transparent') +
-      geom_sf(aes(geometry = val_geometry,
-              color = 'Validation'),
-              fill = 'transparent',
-              linewidth = 0.5) +
-      scale_color_manual(name = '',
-                         values = c('gray90')) +
-      new_scale('color') +
-      geom_sf(aes(geometry = pred_geometry,
-              color = pq_ci_size),
-              fill = 'transparent',
-              linewidth = 0.5) +
-      scale_color_manual(name = 'Prediction\n(Quality)',
-                         breaks = pq_labels,
-                         labels = pq_labels,
-                         values = pq_colors,
-                         drop = FALSE) +
-      new_scale('color') +
-      geom_sf(aes(geometry = rts_geometry,
-              color = status),
-              fill = 'transparent',
-              linewidth = 0.5,
-              linetype = 'dashed') +
-      scale_color_manual(name = 'Feature of Interest',
-                         values = c('blue', 'green'),
-                         drop = FALSE) +
-      new_scale('color') +
-      geom_sf(aes(geometry = mask_geometry,
-              color = 'AOI'),
-              fill = 'transparent',
-              linewidth = 0.5,
-              linetype = 'dashed') +
-      scale_color_manual(name = '',
-                         values = 'purple',
-                         drop = FALSE) +
-      facet_grid(paste('ID:', str_remove(id, "^0+")) ~ imagery + paste('RTS IoU:', round(rts_iou, 2))) +
-      theme(axis.title = element_blank(),
-            axis.text = element_blank(),
-            axis.ticks = element_blank())
-  )
+  print(figure)
+  
+  # ggsave(paste0('./figures/rts_features/', pid, '.pdf'),
+  #        figure,
+  #        height = 3,
+  #        width = 6.5)
 
 }
 ```
@@ -1722,9 +1732,9 @@ ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
 ```{r}
 iou_by_rts_status <- polys %>%
   as_tibble() %>%
-  group_by(imagery, status) %>%
   summarise(mean_iou = mean(mean_iou),
-            rts_iou = mean(rts_iou))
+            rts_iou = mean(rts_iou),
+            .by = c(imagery, status))
 ```
 
 ```{r}
@@ -2235,37 +2245,60 @@ names(zonal_stats_figs) <- variables
 
 A few takeaway points:
 
-- Brighter RTS against a darker background are predicted better. Doesn't seem to be related to seasonality.
+- Brighter RTS against a darker background are predicted better in the Planet model. Doesn't seem to be related to seasonality.
 
 ```{r, fig.width = 7, fig.height = 6}
 zonal_stats_figs[['r_mean']]
 zonal_stats_figs[['g_mean']]
 zonal_stats_figs[['b_mean']]
 zonal_stats_figs[['lum_mean']]
+
+# ggsave('./figures/zonal_stats_red.pdf',
+#        zonal_stats_figs[['r_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_red.jpg',
+#        zonal_stats_figs[['r_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# 
+# ggsave('./figures/zonal_stats_green.pdf',
+#        zonal_stats_figs[['g_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_green.jpg',
+#        zonal_stats_figs[['g_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# 
+# ggsave('./figures/zonal_stats_blue.pdf',
+#        zonal_stats_figs[['b_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_blue.jpg',
+#        zonal_stats_figs[['b_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# 
+# ggsave('./figures/zonal_stats_lum.pdf',
+#        zonal_stats_figs[['lum_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_lum.jpg',
+#        zonal_stats_figs[['lum_mean']],
+#        height = 5.5,
+#        width = 6.5)
 ```
 
--   Well predicted RTS tend to have more consistent NDWI relative to the surrounding landscape, while poorly predicted RTS tend to have less difference in the variability of NDWI between RTS and background pixels.
+-   Poorly predicted RTS in the Planet and Sentinel models had higher NIR values within features. Both plants and soil reflect a lot of NIR... so what this means is a bit unclear.
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['ndwi_sd']]
-```
-
-- RTS are predicted better where the background has variable plant growth and the RTS feature has spatially consistent plant growth (Planet and Sentinel-2 models).
-
-```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['ndvi_sd']]
-```
-
--   The standard deviation of elevation (surface roughness) figure indicates that the Maxar model struggles to identify RTS where RTS (and, perhaps, the landscape) has high surface roughness. There is also a slight trend that where there is higher variability in elevation within RTS relative to the background cells, RTS features are identified more easily in the Planet and Sentinel models. I.e. smooth landscape with uneven RTS is easy for the model to find.
-
-```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['elev_sd']]
+zonal_stats_figs[['nir_mean']]
 ```
 
 I didn't find much interesting about the rest of these figures, but they are included  here for completeness:
 
 ```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['nir_mean']]
 zonal_stats_figs[['ndvi_mean']]
 zonal_stats_figs[['ndwi_mean']]
 zonal_stats_figs[['elev_mean']]
@@ -2275,6 +2308,9 @@ zonal_stats_figs[['g_sd']]
 zonal_stats_figs[['b_sd']]
 zonal_stats_figs[['lum_sd']]
 zonal_stats_figs[['nir_sd']]
+zonal_stats_figs[['ndvi_sd']]
+zonal_stats_figs[['ndwi_sd']]
+zonal_stats_figs[['elev_sd']]
 zonal_stats_figs[['sr_sd']]
 ```
 
@@ -2819,7 +2855,7 @@ autoplot(zonal_stats_pca,
          loadings = TRUE, loadings.colour = 'black',
          loadings.label = TRUE, loadings.label.size = 4,
          loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'IoU') +
+  scale_color_viridis(name = 'RTS IoU') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
                      values = c(16, 1, 2))
@@ -2833,7 +2869,7 @@ autoplot(zonal_stats_pca,
          loadings = TRUE, loadings.colour = 'black',
          loadings.label = TRUE, loadings.label.size = 4,
          loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'IoU') +
+  scale_color_viridis(name = 'RTS IoU') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
                      values = c(16, 1, 2))
@@ -2847,7 +2883,7 @@ autoplot(zonal_stats_pca,
          loadings = TRUE, loadings.colour = 'black',
          loadings.label = TRUE, loadings.label.size = 4,
          loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'IoU') +
+  scale_color_viridis(name = 'RTS IoU') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
                      values = c(16, 1, 2))
@@ -2878,7 +2914,8 @@ autoplot(zonal_stats_pca,
          loadings = TRUE, loadings.colour = 'black',
          loadings.label = TRUE, loadings.label.size = 4,
          loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'RTS Area') +
+  scale_color_viridis(name = 'RTS Area',
+                      trans = 'log10') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
                      values = c(16, 1, 2))
@@ -2892,7 +2929,8 @@ autoplot(zonal_stats_pca,
          loadings = TRUE, loadings.colour = 'black',
          loadings.label = TRUE, loadings.label.size = 4,
          loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'RTS Area') +
+  scale_color_viridis(name = 'RTS Area',
+                      trans = 'log10') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
                      values = c(16, 1, 2))
@@ -2906,7 +2944,8 @@ autoplot(zonal_stats_pca,
          loadings = TRUE, loadings.colour = 'black',
          loadings.label = TRUE, loadings.label.size = 4,
          loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'RTS Area') +
+  scale_color_viridis(name = 'RTS Area',
+                      trans = 'log10') +
   scale_shape_manual(name = 'RTS Class',
                      labels = c('RTS', 'Background', 'Delta'),
                      values = c(16, 1, 2))
@@ -2935,10 +2974,6 @@ print(pq_rf)
 ```
 
 No, we can't predict the prediction quality very well based on the input data, feature size, shape, region, etc.
-
-```{r, fig.width = 7, fig.height = 7}
-randomForest::varImpPlot(pq_rf)
-```
 
 
 ## RTS Morphology
@@ -2970,25 +3005,13 @@ rts_shape_area_iou <- ggplot(polys,
 rts_shape_area_iou
 
 # ggsave('./figures/rts_shape_area.pdf',
-#        shape_area_iou,
+#        rts_shape_area_iou,
 #        height = 4,
 #        width = 6.5)
 # ggsave('./figures/rts_shape_area.jpg',
-#        shape_area_iou,
+#        rts_shape_area_iou,
 #        height = 4,
 #        width = 6.5)
-
-ggplot(polys %>%
-         filter(st_geometry_type(val_geometry) == 'POLYGON'), 
-       aes(x = rts_shape, y = rts_area, color = rts_iou, shape = yg)) +
-  geom_point() +
-  scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
-  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
-                labels = scales::label_number(big.mark = '')) +
-  scale_color_viridis(name = 'RTS IoU') +
-  scale_shape_manual(name = 'Region',
-                     values = c(1, 16)) +
-  facet_grid(. ~ imagery)
 ```
 
 ```{r}
@@ -3001,32 +3024,19 @@ m <- lm(rts_iou ~ rts_area_log10 * rts_shape,
         data = polys %>%
           filter(imagery == 'Maxar' & st_geometry_type(val_geometry) == 'POLYGON'))
 maxar_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
+summary(maxar_iou_lm)
 
 m <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
         data = polys %>%
           filter(imagery == 'Planet' & st_geometry_type(val_geometry) == 'POLYGON'))
 planet_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
 summary(planet_iou_lm)
-# the r2 and AIC are about the same for Planet with rts_iou ~ rts_area_log10
-# or rts_iou ~ rts_area_log10 * rts_shape
-# to allow comparison of the imagery types, I will stick with the more complex
-# model that was chosen as the best for Maxar
-planet_iou_lm <- lm(rts_iou ~ rts_area_log10 * rts_shape,
-                    data = polys %>%
-          filter(imagery == 'Planet' & st_geometry_type(val_geometry) == 'POLYGON'))
 
 m <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
         data = polys %>%
           filter(imagery == 'Sentinel-2' & st_geometry_type(val_geometry) == 'POLYGON'))
 sentinel_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
 summary(sentinel_iou_lm)
-# the r2 and AIC are about the same for Planet with rts_iou ~ rts_area_log10
-# or rts_iou ~ rts_area_log10 * rts_shape
-# to allow comparison of the imagery types, I will stick with the more complex
-# model that was chosen as the best for Maxar
-sentinel_iou_lm <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
-        data = polys %>%
-          filter(imagery == 'Sentinel-2' & st_geometry_type(val_geometry) == 'POLYGON'))
 
 iou_lm_output <- tidy(maxar_iou_lm) %>%
   mutate(Imagery = 'Maxar',
@@ -3050,19 +3060,7 @@ knitr::kable(iou_lm_output)
 
 ## YG Region
 
-The YG Region has smaller RTS features that tend to be more elongated, making them thin and hard to detect across all three imagery types. These factors combined are probably responsible for the poorer IoU scores in the region. The highest RTS IoUs seen in the Maxar and Planet models were just above 0.6, while in the Sentinel-2 model, they were around 0.5.
-
-```{r}
-ggplot(polys,
-       aes(x = rts_area, y = rts_iou, color = rts_shape, shape = yg)) +
-  geom_point() +
-  scale_x_continuous(name = expression('RTS Area (m'^2 * ')')) +
-  scale_y_continuous(name = 'RTS IoU') +
-  scale_color_viridis(name = 'RTS Shape\n(Polsby-Popper)') +
-  scale_shape_manual(name = 'Region',
-                     values = c(1, 16)) +
-  facet_grid(imagery ~ .)
-```
+The YG Region has smaller RTS features, which is probably responsible for the poorer IoU scores in the region.
 
 The Yamal-Gydan Peninsula appears to be both drier and have smaller RTS features, so these two variables are hard to disentangle.
 
@@ -3100,49 +3098,14 @@ rts_pq_hist
 #        width = 6.5)
 ```
 
-```{r, fig.height = 5, fig.width = 7}
-ggplot(polys,
-       aes(x = rts_area, y = rts_iou, shape = yg, color = rts_shape)) +
-  geom_point() +
-  scale_x_log10(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'RTS IoU') +
-  scale_shape_manual(name = 'Region',
-                     values = c(1, 16)) +
-  scale_color_viridis(name = 'RTS Shape') +
-  facet_grid(pq_ci ~ imagery)
-```
-
-```{r, fig.height = 5, fig.width = 7}
-ggplot(polys,
-       aes(x = rts_area, y = rts_iou, shape = yg, color = rts_shape)) +
-  geom_point() +
-  scale_x_log10(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'RTS IoU') +
-  scale_shape_manual(name = 'Region',
-                     values = c(1, 16)) +
-  scale_color_viridis(name = 'RTS Shape') +
-  facet_grid(. ~ imagery)
-```
-
-```{r, fig.height = 5, fig.width = 7}
-ggplot(polys,
-       aes(x = rts_area, y = rts_shape, shape = yg, color = rts_iou)) +
-  geom_point() +
-  scale_x_log10(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'RTS Shape') +
-  scale_shape_manual(name = 'Region',
-                     values = c(1, 16)) +
-  scale_color_viridis(name = 'RTS IoU') +
-  facet_grid(pq_ci ~ imagery)
-```
-
 
 ## Case Studies
 
-The one really large RTS that was poorly predicted in Planet and Sentinel models:
+There are two really large RTS that were poorly predicted in at least one of the Planet and Sentinel models:
 
 -   May be that the RTS being so big is causing issues with the model (missing edges in the imagery)
 -   I'm not sure if this is impacting the prediction, but the tile for Sentinel is pretty different and includes a bunch of open water that's not in either of the other images.
+-   Both the Planet and Sentinel images are really blurry relative to the Maxar in this area, making it visually impossible to delineate the RTS outside of the Maxar data.
 -   The RTS features seem to be brighter relative to the background in the poorly predicted ones, which is backwards from the conclusions of the zonal stats analysis.
 
 ```{r}
@@ -3216,7 +3179,11 @@ ggplot(zonal_stats %>%
   facet_grid(rts_class ~ .)
 ```
 
-The RTS features which had different prediction qualities across all three models:
+In the RTS features which had different prediction qualities across all three models, the main patterns are:
+
+-   Planet completely missed the feature, Maxar did well, Sentinel did ok (2)
+-   The rest all had a prediction in each model, and each permutation was represented for which model had which prediction quality (3)
+
 
 ```{r}
 polys <- polys %>%
@@ -3263,6 +3230,8 @@ for (rts_id in rts_ids) {
   
 }
 ```
+
+Whether or not all the models were able to predict a feature well did not correlate with size or shape:
 
 ```{r}
 ggplot(polys,
@@ -3349,6 +3318,12 @@ plots
 
 Maxar Low Quality Predictions
 
+-   It missed several that looked really green and others that varied in their visibility in the imagery.
+-   It got confused by a snow patch in one.
+-   It detected what is probably a larger, older RTS in one.
+-   It detected more a feature that had expanded since our delineation.
+
+
 ```{r}
 # get polygon data
 current_data <- polys %>%
@@ -3395,6 +3370,8 @@ plots
 ```
 
 Planet High Quality Predictions
+
+-   Most of these display a bright RTS on a dark background.
 
 ```{r}
 # get polygon data
@@ -3443,7 +3420,7 @@ plots
 
 Planet Low Quality Predictions
 
-These images seem like they may be blurrier than the well predicted Planet RTS features.
+These images seem like they may be blurrier than the well predicted Planet RTS features and/or have less contrast.
 
 ```{r}
 # get polygon data
@@ -3492,6 +3469,8 @@ plots
 
 Sentinel High Quality Predictions
 
+-   Many of these are not visible in the imagery, but the model found it anyway. The bright RTS on a dark background pattern seems to hold for many of these, as well.
+
 ```{r}
 # get polygon data
 current_data <- polys %>%
@@ -3538,6 +3517,8 @@ plots
 ```
 
 Sentinel Low Quality Predictions
+
+-   Several of these features are very green.
 
 ```{r}
 # get polygon data
