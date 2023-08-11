@@ -442,31 +442,44 @@ plot_prediction <- function(pid) {
                       values = levels(input_data$color_hex),
                       guide = 'none') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
-            fill = 'transparent',
-            linewidth = 0.25) +
+                color = 'Validation',
+                linewidth = 'Validation'),
+            fill = 'transparent') +
     scale_color_manual(name = '',
-                       values = c('gray90'),
+                       values = c('gray70'),
+                       guide = guide_legend(order = 4)) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.25),
                        guide = guide_legend(order = 4)) +
     new_scale('color') +
+    new_scale('linewidth') +
     geom_sf(aes(geometry = rts_geometry,
-                color = 'Feature of Interest'),
-            fill = 'transparent',
-            linewidth = 0.25,
-            linetype = 'dashed') +
+                color = 'Feature of Interest',
+                linewidth = 'Feature of Interest'),
+            fill = 'transparent') +
     scale_color_manual(name = '',
-                       values = c('green'),
+                       values = c('gray90'),
                        drop = FALSE,
                        guide = guide_legend(order = 2)) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.5),
+                       guide = guide_legend(order = 2)) +
     new_scale('color') +
+    new_scale('linewidth') +
     geom_sf(aes(geometry = mask_geometry,
-                color = 'Feature Mask'),
-            fill = 'transparent',
-            linewidth = 0.25,
-            linetype = 'dashed') +
+                color = 'Mask',
+                linewidth = 'Mask',
+                linetype = 'Mask'),
+            fill = 'transparent') +
     scale_color_manual(name = '',
-                       values = 'gray70',
+                       values = 'gray90',
                        drop = FALSE,
+                       guide = guide_legend(order = 3)) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.25),
+                       guide = guide_legend(order = 3)) +
+    scale_linetype_manual(name = '',
+                          values = c('dashed'),
                        guide = guide_legend(order = 3)) +
     new_scale('color') +
     geom_sf(aes(geometry = pred_geometry,
@@ -488,13 +501,15 @@ plot_prediction <- function(pid) {
           axis.ticks = element_blank(),
           legend.position = 'bottom')
 
-  print(figure)
+  # print(figure)
   
   # ggsave(paste0('./figures/rts_features/', pid, '.pdf'),
   #        figure,
   #        height = 3,
   #        width = 6.5)
 
+  return(figure)
+  
 }
 ```
 
@@ -1090,6 +1105,12 @@ rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.s
   filter(id %in% pred_ids)
 ```
 
+```{r}
+gen_vs_act_tiles <- tibble(`Active` = c('4a', '4e', '4f', '67', '68', '89'),
+                           `General` = c('25 (in validation not testing subset)', '28', '2c', '5e (in validation not testing subset)', '60 (in validation not testing subset)', '7f'))
+
+knitr::kable(gen_vs_act_tiles, align = 'cc')
+```
 
 ## Get Tile Bounding Boxes
 
@@ -1919,7 +1940,8 @@ min_rts_area <- iou_ci %>%
          `RTS Area to Exceed 0.5` = rts_area_exceed_0.5)
 
 # write.csv(min_rts_area,
-#           './tables/rts_area_thresholds.csv')
+#           './tables/rts_area_thresholds.csv',
+#           row.names = FALSE)
 
 knitr::kable(min_rts_area)
 ```
@@ -3018,38 +3040,97 @@ rts_shape_area_iou
 polys <- polys %>%
   mutate(rts_area_log10 = log10(rts_area))
 
-smallest <- rts_iou ~ 1
-biggest <- rts_iou ~ rts_area_log10 * rts_shape
-m <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
-        data = polys %>%
-          filter(imagery == 'Maxar' & st_geometry_type(val_geometry) == 'POLYGON'))
-maxar_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
-summary(maxar_iou_lm)
+# Maxar models
+maxar_lm_smallest <- lm(rts_iou ~ 1,
+                        data = polys %>%
+                          filter(imagery == 'Maxar'))
+maxar_lm_area <- lm(rts_iou ~ rts_area_log10,
+                        data = polys %>%
+                          filter(imagery == 'Maxar'))
+maxar_lm_area_shape <- lm(rts_iou ~ rts_area_log10 + rts_shape,
+                          data = polys %>%
+                            filter(imagery == 'Maxar'))
+maxar_lm_interaction <- lm(rts_iou ~ rts_area_log10*rts_shape,
+                           data = polys %>%
+                             filter(imagery == 'Maxar'))
 
-m <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
-        data = polys %>%
-          filter(imagery == 'Planet' & st_geometry_type(val_geometry) == 'POLYGON'))
-planet_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
-summary(planet_iou_lm)
+# Planet models
+planet_lm_smallest <- lm(rts_iou ~ 1,
+                        data = polys %>%
+                          filter(imagery == 'Planet'))
+planet_lm_area <- lm(rts_iou ~ rts_area_log10,
+                        data = polys %>%
+                          filter(imagery == 'Planet'))
+planet_lm_area_shape <- lm(rts_iou ~ rts_area_log10 + rts_shape,
+                          data = polys %>%
+                            filter(imagery == 'Planet'))
+planet_lm_interaction <- lm(rts_iou ~ rts_area_log10*rts_shape,
+                           data = polys %>%
+                             filter(imagery == 'Planet'))
 
-m <- lm(rts_iou ~ rts_area_log10 * rts_shape, 
-        data = polys %>%
-          filter(imagery == 'Sentinel-2' & st_geometry_type(val_geometry) == 'POLYGON'))
-sentinel_iou_lm <- stats::step(m, scope = list(lower = smallest, upper = biggest))
-summary(sentinel_iou_lm)
+# Sentinel models
+sentinel_lm_smallest <- lm(rts_iou ~ 1,
+                        data = polys %>%
+                          filter(imagery == 'Sentinel-2'))
+sentinel_lm_area <- lm(rts_iou ~ rts_area_log10,
+                        data = polys %>%
+                          filter(imagery == 'Sentinel-2'))
+sentinel_lm_area_shape <- lm(rts_iou ~ rts_area_log10 + rts_shape,
+                          data = polys %>%
+                            filter(imagery == 'Sentinel-2'))
+sentinel_lm_interaction <- lm(rts_iou ~ rts_area_log10*rts_shape,
+                           data = polys %>%
+                             filter(imagery == 'Sentinel-2'))
 
-iou_lm_output <- tidy(maxar_iou_lm) %>%
-  mutate(Imagery = 'Maxar',
-         r2 = summary(maxar_iou_lm)$r.squared) %>%
-  rbind(tidy(planet_iou_lm) %>%
-          mutate(Imagery = 'Planet',
-                 r2 = summary(planet_iou_lm)$r.squared)) %>%
-  rbind(tidy(sentinel_iou_lm) %>%
-          mutate(Imagery = 'Sentinel-2',
-                 r2 = summary(sentinel_iou_lm)$r.squared)) %>%
-  mutate(across(c(r2, estimate:p.value), ~ round(., digits = 3))) %>%
-  select(Imagery, r2, Term = term, Estimate = estimate, `SE` = std.error, `p-value` = p.value)
-
+iou_lm_output <- tibble(Imagery = 'Maxar',
+                        Model = 'IoU ~ 1',
+                        AIC = AIC(maxar_lm_smallest),
+                        r2 = summary(maxar_lm_smallest)$r.squared) %>%
+  bind_rows(tibble(Imagery = 'Maxar',
+                   Model = 'IoU ~ Area',
+                   AIC = AIC(maxar_lm_area),
+                   r2 = summary(maxar_lm_area)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Maxar',
+                   Model = 'IoU ~ Area + Shape',
+                   AIC = AIC(maxar_lm_area_shape),
+                   r2 = summary(maxar_lm_area_shape)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Maxar',
+                   Model = 'IoU ~ Area*Shape',
+                   AIC = AIC(maxar_lm_interaction),
+                   r2 = summary(maxar_lm_interaction)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Planet',
+                   Model = 'IoU ~ 1',
+                   AIC = AIC(planet_lm_smallest),
+                   r2 = summary(planet_lm_smallest)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Planet',
+                   Model = 'IoU ~ Area',
+                   AIC = AIC(planet_lm_area),
+                   r2 = summary(planet_lm_area)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Planet',
+                   Model = 'IoU ~ Area + Shape',
+                   AIC = AIC(planet_lm_area_shape),
+                   r2 = summary(planet_lm_area_shape)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Planet',
+                   Model = 'IoU ~ Area*Shape',
+                   AIC = AIC(planet_lm_interaction),
+                   r2 = summary(planet_lm_interaction)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Sentinel-2',
+                   Model = 'IoU ~ 1',
+                   AIC = AIC(sentinel_lm_smallest),
+                   r2 = summary(sentinel_lm_smallest)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Sentinel-2',
+                   Model = 'IoU ~ Area',
+                   AIC = AIC(sentinel_lm_area),
+                   r2 = summary(sentinel_lm_area)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Sentinel-2',
+                   Model = 'IoU ~ Area + Shape',
+                   AIC = AIC(sentinel_lm_area_shape),
+                   r2 = summary(sentinel_lm_area_shape)$r.squared)) %>%
+  bind_rows(tibble(Imagery = 'Sentinel-2',
+                   Model = 'IoU ~ Area*Shape',
+                   AIC = AIC(sentinel_lm_interaction),
+                   r2 = summary(sentinel_lm_interaction)$r.squared)) %>%
+  mutate(across(r2:AIC, ~ round(.x, 3)))
 knitr::kable(iou_lm_output)
 
 # write.csv(iou_lm_output,
@@ -3258,15 +3339,10 @@ ggplot(polys, aes(x = rts_shape, y = pq_n_unique)) +
 Visualize the RTS predictions
 
 ```{r fig.width = 12, fig.height = 4.8}
-walk(pred_ids,
-    ~ plot_prediction(.x))
-```
-
-```{r}
-gen_vs_act_tiles <- tibble(`Active(?)` = c('4a', '4e', '4f', '67', '68', '89'),
-                           `General(?)` = c('??', '28', '2c', '??', '??', '7f'))
-
-knitr::kable(gen_vs_act_tiles, align = 'cc')
+rts_maps <- map(pred_ids,
+                 ~ plot_prediction(.x))
+walk(rts_maps,
+     ~ print(.x))
 ```
 
 Maxar High Quality Predictions
