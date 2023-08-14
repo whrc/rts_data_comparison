@@ -8,10 +8,8 @@ output:
 
 ## TODO:
 
--   Figure out what to do with the disagreeing RTS outlines in the shapefile vs. the raster input data (4a, 4e, 4f, 67, 68, 89). It looks like the general outline was used in all tiles, regardless of whether or not the vector polygon from the shapefile was the active or general outline. Also figure out where the general outline used for the RTSLabel layer came from for 4a, 67, and 68.
--   ID 17 looks like the ground truth outline might be offset from all three imagery products
+-   Finalize RTS sample figure. Put IoU label in plot? Remove ID and IoU facet labels?
 -   Start picking figures to include in manuscript!
--   Figure out why my IoU scores don't quite match Yili's. Removing scores for missing RTS gets close on most models, but is still pretty far off for the Maxar (0-1) model.
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -483,7 +481,7 @@ plot_prediction <- function(pid) {
                        guide = guide_legend(order = 3)) +
     new_scale('color') +
     geom_sf(aes(geometry = pred_geometry,
-                color = pq_ci_size),
+                color = pq_ci),
             fill = 'transparent',
             linewidth = 0.5) +
     scale_color_manual(name = 'Prediction\n(Quality)',
@@ -1025,7 +1023,7 @@ maxar_pred_files_zscore <- list.files(maxar_pred_filepath_zscore,
 maxar_preds <- map(maxar_pred_files, ~ import_pred(.x))
 maxar_preds_zscore <- map(maxar_pred_files_zscore, ~ import_pred(.x))
 
-pred_ids <- map(maxar_preds, ~ get_rast_id(.x))
+pred_ids <- map_chr(maxar_preds, ~ get_rast_id(.x))
 
 ### Remove this if we figure out the Active vs. General Duplicates
 indices <- which(
@@ -3343,6 +3341,45 @@ rts_maps <- map(pred_ids,
                  ~ plot_prediction(.x))
 walk(rts_maps,
      ~ print(.x))
+```
+
+Selection of RTS Maps
+
+```{r, fig.width = 6.5, fig.height = 9}
+ggarrange(rts_maps[[which(pred_ids == "00000000000000000072")]] +
+           theme(legend.position = 'none'),
+         rts_maps[[which(pred_ids == "0000000000000000005d")]] +
+           theme(legend.position = 'none',
+                 strip.background.x = element_blank(),
+                 strip.text.x = element_blank()),
+         rts_maps[[which(pred_ids == "00000000000000000032")]] +
+           theme(legend.position = 'none',
+                 strip.background.x = element_blank(),
+                 strip.text.x = element_blank()),
+         rts_maps[[which(pred_ids == "00000000000000000006")]] +
+           theme(legend.position = 'none',
+                 strip.background.x = element_blank(),
+                 strip.text.x = element_blank()),
+         rts_maps[[which(pred_ids == "00000000000000000046")]] +
+           theme(legend.position = 'none',
+                 strip.background.x = element_blank(),
+                 strip.text.x = element_blank()),
+         rts_maps[[which(pred_ids == "00000000000000000010")]] +
+           theme(legend.position = 'none',
+                 strip.background.x = element_blank(),
+                 strip.text.x = element_blank()),
+         rts_maps[[which(pred_ids == "00000000000000000012")]] +
+           theme(legend.position = 'none',
+                 strip.background.x = element_blank(),
+                 strip.text.x = element_blank()),
+         rts_maps[[which(pred_ids == "00000000000000000016")]] +
+           theme(legend.position = 'none',
+                 strip.background.x = element_blank(),
+                 strip.text.x = element_blank()),
+         rts_maps[[which(pred_ids == "0000000000000000006c")]] +
+           theme(strip.background.x = element_blank(),
+                 strip.text.x = element_blank()),
+         ncol = 1)
 ```
 
 Maxar High Quality Predictions
