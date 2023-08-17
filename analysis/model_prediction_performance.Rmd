@@ -8,7 +8,7 @@ output:
 
 ## TODO:
 
--   Finalize RTS sample figure. Put IoU label in plot? Remove ID and IoU facet labels?
+-   Finalize RTS sample figure. Put IoU label in plot instead of as a facet label. Add imagery facet labels. Adjust order of predictions to be grouped by what kind of example I am using the prediction for.
 -   Start picking figures to include in manuscript!
 
 ## Set-Up
@@ -35,7 +35,7 @@ library(emmeans)
 library(nlstools)
 library(Ryacas)
 library(ggnewscale)
-library(egg)
+library(patchwork)
 library(ggsignif)
 library(ggfortify)
 library(plotly)
@@ -413,6 +413,87 @@ my_nlsBootPredict <- function (nlsBoot, newdata,
 }
 ```
 
+### plot_individual_prediction
+
+```{r}
+plot_individual_prediction <- function(imagery_type, raster_data, vector_data, dims) {
+  
+  # select current RGB imagery data
+  rgb <- raster_data %>%
+    filter(imagery == imagery_type)
+  
+  figure <- ggplot(data = vector_data %>%
+               filter(imagery == imagery_type)) +
+      geom_raster(data = rgb,
+                  aes(x = x, y = y, fill = color_hex),
+                  inherit.aes = FALSE) +
+      scale_fill_manual(breaks = levels(input_data$color_hex),
+                        values = levels(input_data$color_hex),
+                        guide = 'none') +
+      geom_sf(aes(geometry = val_geometry,
+                  color = 'Validation',
+                  linewidth = 'Validation'),
+              fill = 'transparent') +
+      scale_color_manual(name = '',
+                         values = c('gray70'),
+                         guide = guide_legend(order = 4)) +
+      scale_linewidth_manual(name = '',
+                             values = c(0.25),
+                             guide = guide_legend(order = 4)) +
+      new_scale('color') +
+      new_scale('linewidth') +
+      geom_sf(aes(geometry = rts_geometry,
+                  color = 'Feature of Interest',
+                  linewidth = 'Feature of Interest'),
+              fill = 'transparent') +
+      scale_color_manual(name = '',
+                         values = c('gray90'),
+                         drop = FALSE,
+                         guide = guide_legend(order = 2)) +
+      scale_linewidth_manual(name = '',
+                             values = c(0.5),
+                             guide = guide_legend(order = 2)) +
+      new_scale('color') +
+      new_scale('linewidth') +
+      geom_sf(aes(geometry = mask_geometry,
+                  color = 'Mask',
+                  linewidth = 'Mask',
+                  linetype = 'Mask'),
+              fill = 'transparent') +
+      scale_color_manual(name = '',
+                         values = 'gray90',
+                         drop = FALSE,
+                         guide = guide_legend(order = 3)) +
+      scale_linewidth_manual(name = '',
+                             values = c(0.25),
+                             guide = guide_legend(order = 3)) +
+      scale_linetype_manual(name = '',
+                            values = c('dashed'),
+                            guide = guide_legend(order = 3)) +
+      new_scale('color') +
+      geom_sf(aes(geometry = pred_geometry,
+                  color = pq_ci),
+              fill = 'transparent',
+              linewidth = 0.5) +
+      scale_color_manual(name = 'Prediction\n(Quality)',
+                         breaks = pq_labels,
+                         labels = pq_labels,
+                         values = pq_colors,
+                         drop = FALSE,
+                         guide = guide_legend(order = 1, nrow = 3)) +
+      facet_grid(. ~paste('RTS IoU:', round(rts_iou, 2))) +
+      theme(axis.title = element_blank(),
+            axis.text = element_blank(),
+            axis.ticks = element_blank(),
+            legend.position = 'bottom') +
+    coord_sf(xlim = c(dims$x_min, dims$x_max),
+             ylim = c(dims$y_min, dims$y_max))
+  
+  return(figure)
+}
+
+```
+
 ### plot_prediction
 
 ```{r}
@@ -505,6 +586,45 @@ plot_prediction <- function(pid) {
   #        figure,
   #        height = 3,
   #        width = 6.5)
+
+  return(figure)
+  
+}
+```
+
+### plot_prediction_2
+
+```{r}
+plot_prediction_2 <- function(pid, imagery_types, dims) {
+  
+  # get polygon data
+  current_data <- polys %>%
+    filter(id == pid) %>%
+    select(imagery, id, status, rts_iou, pq_ci, pq_ci_size, bbox_geometry, 
+           mask_geometry, rts_geometry, val_geometry, pred_geometry) %>%
+    mutate(status = factor(status, levels = c('Active', 'General')))
+  
+  # prep RGB data
+  current_rgb <- input_data %>%
+    filter(id == pid) %>%
+    full_join(current_data %>%
+                select(id, imagery, rts_iou),
+              by = c('imagery', 'id', 'rts_iou'))
+  
+  # get extent of current tile
+  current_dims <- current_rgb %>%
+    summarise(x_min = mean(x) - dims$x_spread_max/2,
+              x_max = mean(x) + dims$x_spread_max/2,
+              y_min = mean(y) - dims$y_spread_max/2,
+              y_max = mean(y) + dims$y_spread_max/2)
+  
+  # make a map for each imagery type separately
+  figures <- map(
+    imagery_types,
+    ~ plot_individual_prediction(.x, current_rgb, current_data, current_dims)
+  )
+  
+  figure <- figures[[1]] | figures[[2]] | figures[[3]]
 
   return(figure)
   
@@ -617,21 +737,24 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
                       select(lwr, upr) %>%
                       as_vector())
 
-  zonal_stats_fig <- ggarrange(rts_fig +
-                                 theme(axis.text.x = element_blank(),
-                                       axis.ticks.x = element_blank(),
-                                       axis.title.y = element_blank()),
-                               delta_fig +
-                                 theme(strip.background.x = element_blank(),
-                                       strip.text.x = element_blank(),
-                                       axis.text.x = element_blank(),
-                                       axis.ticks.x = element_blank()),
-                               bg_fig +
-                                 theme(strip.background.x = element_blank(),
-                                       strip.text.x = element_blank(),
-                                       axis.ticks.x = element_blank(),
-                                       axis.title.y = element_blank()),
-                               ncol = 1)
+  zonal_stats_fig <- (
+    rts_fig +
+      theme(axis.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            axis.title.y = element_blank())
+  ) / (
+    delta_fig +
+      theme(strip.background.x = element_blank(),
+            strip.text.x = element_blank(),
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank())
+  ) / (
+    bg_fig +
+      theme(strip.background.x = element_blank(),
+            strip.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            axis.title.y = element_blank())
+  )
   
   return(zonal_stats_fig)
 }
@@ -1539,15 +1662,10 @@ rts_shape_hist
 ```
 
 ```{r, fig.height = 4, fig.width = 6.5}
-rts_area_shape_hist <- ggarrange(
-  rts_area_hist +
-    theme(legend.position = 'none'),
+rts_area_shape_hist <- rts_area_hist  /
   rts_shape_hist +
-    theme(legend.position = 'bottom'),
-  ncol = 1,
-  nrow = 2
-)
-
+    plot_layout(guides = 'collect') & theme(legend.position = 'bottom')
+rts_area_shape_hist
 # ggsave('./figures/rts_area_shape_hist.pdf',
 #        rts_area_shape_hist,
 #        width = 6.5,
@@ -1820,7 +1938,7 @@ ggplot(polys,
 
 ### Classify Features Using Confidence Interval Approach
 
-This approach first uses the 95% CI of the model parameters to determine whether RTS features were predicted better or worse than expected based on the model. Next, the threshold at which RTS size doesn't impact IoU is determined from where the slope of the model approaches 0 (currently using slope < 1e-06) for each imagery type. RTS features smaller than this threshold that were predicted better than expected are analyzed later to determine why some small RTS can be identified from the imagery.
+This approach first uses the 50% CI of the model parameters to determine whether RTS features were predicted better or worse than expected based on the model. Next, the threshold at which RTS size doesn't impact IoU is determined from where the slope of the model approaches 0 (currently using slope < 1e-06) for each imagery type. RTS features smaller than this threshold that were predicted better than expected are analyzed later to determine why some small RTS can be identified from the imagery.
 
 
 ```{r, include = FALSE}
@@ -3345,41 +3463,54 @@ walk(rts_maps,
 
 Selection of RTS Maps
 
+```{r}
+id_subset <- c(
+    "00000000000000000072",
+    "0000000000000000005d",
+    "00000000000000000032",
+    "00000000000000000006",
+    "00000000000000000046",
+    "00000000000000000010",
+    "00000000000000000012",
+    "00000000000000000016",
+    "0000000000000000006c"
+  )
+
+map_dimensions <- input_data %>%
+  filter(id %in% id_subset) %>%
+    summarise(x_spread = max(x) - min(x),
+              y_spread = max(y) - min(y),
+              .by = c('id')) %>%
+    summarise(x_spread_max = max(x_spread),
+              y_spread_max = max(y_spread))
+
+rts_maps_subset <- map(
+  pred_ids[which(pred_ids %in% id_subset)],
+  ~ plot_prediction_2(.x, imagery_labels, map_dimensions)
+)
+```
+
 ```{r, fig.width = 6.5, fig.height = 9}
-ggarrange(rts_maps[[which(pred_ids == "00000000000000000072")]] +
-           theme(legend.position = 'none'),
-         rts_maps[[which(pred_ids == "0000000000000000005d")]] +
-           theme(legend.position = 'none',
-                 strip.background.x = element_blank(),
-                 strip.text.x = element_blank()),
-         rts_maps[[which(pred_ids == "00000000000000000032")]] +
-           theme(legend.position = 'none',
-                 strip.background.x = element_blank(),
-                 strip.text.x = element_blank()),
-         rts_maps[[which(pred_ids == "00000000000000000006")]] +
-           theme(legend.position = 'none',
-                 strip.background.x = element_blank(),
-                 strip.text.x = element_blank()),
-         rts_maps[[which(pred_ids == "00000000000000000046")]] +
-           theme(legend.position = 'none',
-                 strip.background.x = element_blank(),
-                 strip.text.x = element_blank()),
-         rts_maps[[which(pred_ids == "00000000000000000010")]] +
-           theme(legend.position = 'none',
-                 strip.background.x = element_blank(),
-                 strip.text.x = element_blank()),
-         rts_maps[[which(pred_ids == "00000000000000000012")]] +
-           theme(legend.position = 'none',
-                 strip.background.x = element_blank(),
-                 strip.text.x = element_blank()),
-         rts_maps[[which(pred_ids == "00000000000000000016")]] +
-           theme(legend.position = 'none',
-                 strip.background.x = element_blank(),
-                 strip.text.x = element_blank()),
-         rts_maps[[which(pred_ids == "0000000000000000006c")]] +
-           theme(strip.background.x = element_blank(),
-                 strip.text.x = element_blank()),
-         ncol = 1)
+(
+  rts_maps_subset[[1]]
+) / (
+  rts_maps_subset[[2]]
+) / (
+  rts_maps_subset[[3]]
+) / (
+  rts_maps_subset[[4]]
+) / (
+  rts_maps_subset[[5]]
+) / (
+  rts_maps_subset[[6]]
+) / (
+  rts_maps_subset[[7]]
+) / (
+  rts_maps_subset[[8]]
+) / (
+  rts_maps_subset[[9]]
+) +
+  plot_layout(guides = 'collect') & theme(legend.position = 'right')
 ```
 
 Maxar High Quality Predictions
