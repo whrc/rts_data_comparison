@@ -8,7 +8,7 @@ output:
 
 ## TODO:
 
--   Finalize RTS sample figure. Put IoU label in plot instead of as a facet label. Add imagery facet labels. Adjust order of predictions to be grouped by what kind of example I am using the prediction for.
+-   Finalize RTS sample figure. Try zooming in on imagery so that it looks neater. 
 -   Start picking figures to include in manuscript!
 
 ## Set-Up
@@ -39,6 +39,7 @@ library(patchwork)
 library(ggsignif)
 library(ggfortify)
 library(plotly)
+library(ggthemes)
 library(tidyverse)
 theme_set(theme_bw())
 ```
@@ -422,8 +423,11 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
   rgb <- raster_data %>%
     filter(imagery == imagery_type)
   
-  figure <- ggplot(data = vector_data %>%
-               filter(imagery == imagery_type)) +
+  vector <- vector_data %>%
+               filter(imagery == imagery_type)
+  label <- paste('RTS IoU:', round(vector$rts_iou, 2))
+  
+  figure <- ggplot(data = vector) +
       geom_raster(data = rgb,
                   aes(x = x, y = y, fill = color_hex),
                   inherit.aes = FALSE) +
@@ -443,8 +447,8 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
       new_scale('color') +
       new_scale('linewidth') +
       geom_sf(aes(geometry = rts_geometry,
-                  color = 'Feature of Interest',
-                  linewidth = 'Feature of Interest'),
+                  color = 'Feature of\nInterest',
+                  linewidth = 'Feature of\nInterest'),
               fill = 'transparent') +
       scale_color_manual(name = '',
                          values = c('gray90'),
@@ -481,13 +485,29 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
                          values = pq_colors,
                          drop = FALSE,
                          guide = guide_legend(order = 1, nrow = 3)) +
-      facet_grid(. ~paste('RTS IoU:', round(rts_iou, 2))) +
-      theme(axis.title = element_blank(),
-            axis.text = element_blank(),
-            axis.ticks = element_blank(),
-            legend.position = 'bottom') +
+    geom_label(x = dims$x_min + 175, 
+               y = dims$y_min + 30, 
+               label = label, 
+               size = 2.5,
+               label.padding = unit(0.1, 'lines'),
+               label.r = unit(0, 'lines'),
+               label.size = unit(0, 'lines')) +
+    # facet_grid(. ~paste('RTS IoU:', round(rts_iou, 2))) +
     coord_sf(xlim = c(dims$x_min, dims$x_max),
-             ylim = c(dims$y_min, dims$y_max))
+             ylim = c(dims$y_min, dims$y_max),
+             expand = FALSE) +
+    # theme_few() +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          panel.grid = element_blank(),
+          legend.position = 'bottom',
+          plot.margin = margin(0, 0, 0, 0, "pt"))
+  
+  if (vector$id == '00000000000000000072') {
+    figure <- figure +
+      facet_grid(. ~ imagery)
+  }
   
   return(figure)
 }
@@ -3467,50 +3487,69 @@ Selection of RTS Maps
 id_subset <- c(
     "00000000000000000072",
     "0000000000000000005d",
-    "00000000000000000032",
-    "00000000000000000006",
     "00000000000000000046",
+    "00000000000000000032",
+    "00000000000000000023",
+    "00000000000000000006",
     "00000000000000000010",
     "00000000000000000012",
-    "00000000000000000016",
-    "0000000000000000006c"
+    "00000000000000000016"
   )
 
 map_dimensions <- input_data %>%
   filter(id %in% id_subset) %>%
-    summarise(x_spread = max(x) - min(x),
-              y_spread = max(y) - min(y),
-              .by = c('id')) %>%
-    summarise(x_spread_max = max(x_spread),
-              y_spread_max = max(y_spread))
+  summarise(x_spread = max(x) - min(x),
+            y_spread = max(y) - min(y),
+            .by = c('id')) %>%
+  summarise(x_spread_max = max(x_spread),
+            y_spread_max = max(y_spread))
 
 rts_maps_subset <- map(
-  pred_ids[which(pred_ids %in% id_subset)],
+  id_subset,
   ~ plot_prediction_2(.x, imagery_labels, map_dimensions)
 )
 ```
 
 ```{r, fig.width = 6.5, fig.height = 9}
-(
-  rts_maps_subset[[1]]
+rts_highlights_plot <- (
+  rts_maps_subset[[1]] +
+    facet_grid('Good Prediction' ~ imagery)
 ) / (
-  rts_maps_subset[[2]]
+  rts_maps_subset[[2]] +
+    facet_grid('Good Prediction' ~ .)
 ) / (
-  rts_maps_subset[[3]]
+  rts_maps_subset[[3]] +
+    facet_grid('Bright RTS' ~ .)
 ) / (
-  rts_maps_subset[[4]]
+  rts_maps_subset[[4]] +
+    facet_grid('Imagery Matters' ~ .)
 ) / (
-  rts_maps_subset[[5]]
+  rts_maps_subset[[5]] +
+    facet_grid('Imagery Matters' ~ .)
 ) / (
-  rts_maps_subset[[6]]
+  rts_maps_subset[[6]] +
+    facet_grid('Green RTS' ~ .)
 ) / (
-  rts_maps_subset[[7]]
+  rts_maps_subset[[7]] +
+    facet_grid('Small RTS' ~ .)
 ) / (
-  rts_maps_subset[[8]]
+  rts_maps_subset[[8]] +
+    facet_grid('Small RTS' ~ .)
 ) / (
-  rts_maps_subset[[9]]
+  rts_maps_subset[[9]] +
+    facet_grid('Snow' ~ .)
 ) +
   plot_layout(guides = 'collect') & theme(legend.position = 'right')
+
+rts_highlights_plot
+# ggsave('./figures/rts_highlights.pdf',
+#        rts_highlights_plot,
+#        height = 9,
+#        width = 6.5)
+# ggsave('./figures/rts_highlights.jpg',
+#        rts_highlights_plot,
+#        height = 9,
+#        width = 6.5)
 ```
 
 Maxar High Quality Predictions
