@@ -8,7 +8,7 @@ output:
 
 ## TODO:
 
--   Finalize RTS sample figure. Try zooming in on imagery so that it looks neater. 
+-   Finalize RTS sample figure. Try zooming in on imagery so that it looks neater. Show outlines of predictions for all features within one tile?
 -   Start picking figures to include in manuscript!
 
 ## Set-Up
@@ -500,6 +500,7 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
     theme(axis.title = element_blank(),
           axis.text = element_blank(),
           axis.ticks = element_blank(),
+          strip.text.y = element_text(size = 6),
           panel.grid = element_blank(),
           legend.position = 'bottom',
           plot.margin = margin(0, 0, 0, 0, "pt"))
@@ -1558,7 +1559,6 @@ knitr::kable(iou, caption = 'IoU (Calculated Directly from Predictions)')
 ```{r, fig.width = 4, fig.height = 4}
 imagery_performance_summary <- polys %>%
   as_tibble() %>%
-  group_by(imagery) %>%
   summarise(rts_iou_mean = mean(rts_iou),
             rts_iou_median = median(rts_iou),
             rts_iou_sd = sd(rts_iou),
@@ -1567,7 +1567,8 @@ imagery_performance_summary <- polys %>%
 
 ggplot(polys,
        aes(x = rts_iou, fill = imagery)) +
-  geom_histogram(bins = 15) +
+  geom_histogram(binwidth = 0.05,
+                 boundary = 0) +
   geom_vline(data = imagery_performance_summary,
              aes(xintercept = rts_iou_median, linetype = 'Median')) +
   geom_vline(data = imagery_performance_summary,
@@ -1581,7 +1582,8 @@ ggplot(polys,
   # geom_vline(data = imagery_performance_summary,
   #            aes(xintercept = rts_iou_median + 2*rts_iou_sd),
   #            linetype = 'dotted') +
-  scale_x_continuous(name = 'RTS IoU') +
+  scale_x_continuous(name = 'RTS IoU',
+                     minor_breaks = seq(0, 0.95, by = 0.05)) +
   scale_y_continuous(name = 'Count') +
   scale_fill_manual(values = imagery_colors) +
   scale_linetype_manual(values = c('solid', 'dashed')) +
@@ -1596,6 +1598,23 @@ ggplot(polys,
 #        width = 4)
 
 knitr::kable(imagery_performance_summary)
+
+knitr::kable(
+  polys %>%
+    ungroup() %>%
+    filter(rts_iou == 0) %>%
+    summarise(missed_feature_count = n(),
+              max_area = max(rts_area),
+              .by = 'imagery')
+)
+
+knitr::kable(
+  polys %>%
+    ungroup() %>%
+    filter(rts_iou == 0) %>%
+    summarise(missed_feature_count = n(),
+              .by = c('imagery', 'yg'))
+)
 ```
 
 
@@ -1663,12 +1682,41 @@ rts_area_hist
 ```
 
 ```{r, include = FALSE}
+arrows <- tibble(
+  xmin = c(
+    min(polys$rts_shape) + 0.0625*(max(polys$rts_shape) - min(polys$rts_shape)),
+    max(polys$rts_shape) - 0.0625*(max(polys$rts_shape) - min(polys$rts_shape))
+    ),
+  xmax = c(
+    min(polys$rts_shape),
+    max(polys$rts_shape)
+    ),
+  y = rep(-0.85, 2),
+  label = c('Less Compact', 'More Compact')
+  )
+
 rts_shape_hist <- ggplot(polys, aes(x = rts_shape, fill = yg)) +
   geom_density(alpha = 0.9) +
+  annotate(
+    'segment',
+    x = arrows$xmin, xend = arrows$xmax,
+    y = arrows$y, yend = arrows$y,
+    arrow = arrow(length = unit(0.3, 'cm'))
+  ) +
+  annotate(
+    'text',
+    x = arrows$xmin + c(0.01, -0.01),
+    y = arrows$y,
+    label = arrows$label,
+    size = 3,
+    hjust = c(0, 1)
+  ) +
   scale_fill_manual(values = c('white', 'black')) +
   scale_x_continuous(name = expression('RTS Shape')) +
   scale_y_continuous(name = 'Density') +
-  theme(legend.title = element_blank())
+  theme(legend.title = element_blank()) +
+  coord_cartesian(clip = 'off',
+                  ylim = c(0, 2.55))
 rts_shape_hist
 
 # ggsave('./figures/rts_shape_hist.pdf',
@@ -2082,7 +2130,7 @@ min_rts_area <- iou_ci %>%
 knitr::kable(min_rts_area)
 ```
 
-```{r, fig.width = 12}
+```{r, fig.width = 6.5, fig.height = 4}
 ggplot(polys, 
        aes(x = rts_area, 
            y = rts_iou)) +
@@ -2100,19 +2148,22 @@ ggplot(polys,
             inherit.aes = FALSE) +
   scale_color_manual(name = 'Imagery',
                      values = imagery_colors) +
-  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'RTS IoU') +
+  scale_x_continuous(name = expression('RTS Area (m'^2*')'),
+                     minor_breaks = seq(0, 125000, by = 5000)) +
+  scale_y_continuous(name = 'RTS IoU',
+                     limits = c(-0.1, 1),
+                     expand = expansion(mult = 0),
+                     minor_breaks = seq(-0.1, 1, by = 0.05)) +
   scale_shape_manual(name = 'Region',
                      values = c(1, 16)) +
-  # coord_cartesian(ylim = c(0, 1)) +
   facet_grid(. ~ imagery) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
 # ggsave('./figures/area_iou.pdf',
-#        height = 4.5,
+#        height = 4,
 #        width = 6.5)
 # ggsave('./figures/area_iou.jpg',
-#        height = 4.5,
+#        height = 4,
 #        width = 6.5)
 ```
 
