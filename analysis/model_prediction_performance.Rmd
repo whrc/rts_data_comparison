@@ -2527,6 +2527,15 @@ zonal_stats_figs[['lum_mean']]
 
 ```{r, fig.width = 7, fig.height = 6}
 zonal_stats_figs[['nir_mean']]
+
+# ggsave('./figures/zonal_stats_nir.pdf',
+#        zonal_stats_figs[['nir_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_nir.jpg',
+#        zonal_stats_figs[['nir_mean']],
+#        height = 5.5,
+#        width = 6.5)
 ```
 
 I didn't find much interesting about the rest of these figures, but they are included  here for completeness:
