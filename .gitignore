@@ -3,6 +3,7 @@ data/
 *.qgz
 figures/
 tables/
+manuscript/
 
 # History files
 .Rhistory
