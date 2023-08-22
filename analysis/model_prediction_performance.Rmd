@@ -8,8 +8,7 @@ output:
 
 ## TODO:
 
--   Finalize RTS sample figure. Try zooming in on imagery so that it looks neater. Show outlines of predictions for all features within one tile?
--   Start picking figures to include in manuscript!
+-   Finalize RTS sample figure. Show outlines of predictions for all features within one tile?
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -485,8 +484,8 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
                          values = pq_colors,
                          drop = FALSE,
                          guide = guide_legend(order = 1, nrow = 3)) +
-    geom_label(x = dims$x_min + 175, 
-               y = dims$y_min + 30, 
+    geom_label(x = dims$x_min + 110, 
+               y = dims$y_min + 20, 
                label = label, 
                size = 2.5,
                label.padding = unit(0.1, 'lines'),
@@ -632,12 +631,17 @@ plot_prediction_2 <- function(pid, imagery_types, dims) {
                 select(id, imagery, rts_iou),
               by = c('imagery', 'id', 'rts_iou'))
   
-  # get extent of current tile
-  current_dims <- current_rgb %>%
-    summarise(x_min = mean(x) - dims$x_spread_max/2,
-              x_max = mean(x) + dims$x_spread_max/2,
-              y_min = mean(y) - dims$y_spread_max/2,
-              y_max = mean(y) + dims$y_spread_max/2)
+  # get desired extent of current tile
+  current_dims <- current_data %>%
+    slice(1) %>%
+    st_as_sf(crs = 3413) %>%
+    bind_cols(map_dfr(.$rts_geometry, 
+               ~ st_bbox(.x))) %>%
+    mutate(x_min = (xmin + xmax)/2 - dims$x_spread_max/2,
+           x_max = (xmin + xmax)/2 + dims$x_spread_max/2,
+           y_min = (ymin + ymax)/2 - dims$y_spread_max/2,
+           y_max = (ymin + ymax)/2 + dims$y_spread_max/2) %>%
+    select(x_min, x_max, y_min, y_max)
   
   # make a map for each imagery type separately
   figures <- map(
@@ -698,7 +702,8 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
-    theme(axis.title.x = element_blank()) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
     coord_cartesian(ylim = limits %>%
                       filter(variable == y_var & rts_class == 'RTS') %>%
                       ungroup() %>%
@@ -725,7 +730,8 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
-    theme(axis.title.x = element_blank()) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
     coord_cartesian(ylim = limits %>%
                       filter(variable == y_var & rts_class == 'Delta') %>%
                       ungroup() %>%
@@ -752,6 +758,7 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid(rts_class ~ imagery) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
     coord_cartesian(ylim = limits %>%
                       filter(variable == y_var & rts_class == 'Background') %>%
                       ungroup() %>%
@@ -773,7 +780,6 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     bg_fig +
       theme(strip.background.x = element_blank(),
             strip.text.x = element_blank(),
-            axis.ticks.x = element_blank(),
             axis.title.y = element_blank())
   )
   
@@ -1546,10 +1552,10 @@ polys <- polys %>%
 ```{r}
 iou <- polys %>%
   as_tibble() %>%
-  group_by(imagery) %>%
   summarise(rts_iou = round(mean(rts_iou), 2),
             mean_iou = round(mean(mean_iou), 2),
-            mean_iou_v2 = round(mean(mean_iou_v2), 2)) %>%
+            mean_iou_v2 = round(mean(mean_iou_v2), 2),
+            .by = 'imagery') %>%
   select(Imagery = imagery, `RTS IoU` = rts_iou, `Val IoU` = mean_iou, `Val IoU (remove zeros)` = mean_iou_v2)
 knitr::kable(iou, caption = 'IoU (Calculated Directly from Predictions)')
 ```
@@ -1598,23 +1604,6 @@ ggplot(polys,
 #        width = 4)
 
 knitr::kable(imagery_performance_summary)
-
-knitr::kable(
-  polys %>%
-    ungroup() %>%
-    filter(rts_iou == 0) %>%
-    summarise(missed_feature_count = n(),
-              max_area = max(rts_area),
-              .by = 'imagery')
-)
-
-knitr::kable(
-  polys %>%
-    ungroup() %>%
-    filter(rts_iou == 0) %>%
-    summarise(missed_feature_count = n(),
-              .by = c('imagery', 'yg'))
-)
 ```
 
 
@@ -1665,10 +1654,15 @@ polys <- polys %>%
 ```{r, include = FALSE}
 rts_area_hist <- ggplot(polys, aes(x = rts_area, fill = yg)) +
   geom_density(alpha = 0.9) +
-  scale_fill_manual(values = c('white', 'black')) +
-  scale_x_log10(name = expression('RTS Area (m'^2*')')) +
-  scale_y_continuous(name = 'Density') +
-  theme(legend.title = element_blank())
+  scale_fill_manual(name = 'Region',
+                    values = c('white', 'black')) +
+  scale_x_log10(name = expression('RTS Area (m'^2*')'),
+                labels = scales::label_number(big.mark = ''),
+                minor_breaks = c(seq(100, 900, by = 100),
+                           seq(1000, 9000, by = 1000),
+                           seq(10000, 90000, by = 10000),
+                           seq(100000, 200000, by = 100000))) +
+  scale_y_continuous(name = 'Density')
 rts_area_hist
 
 # ggsave('./figures/rts_area_hist.pdf',
@@ -1711,10 +1705,10 @@ rts_shape_hist <- ggplot(polys, aes(x = rts_shape, fill = yg)) +
     size = 3,
     hjust = c(0, 1)
   ) +
-  scale_fill_manual(values = c('white', 'black')) +
+  scale_fill_manual(name = 'Region',
+                    values = c('white', 'black')) +
   scale_x_continuous(name = expression('RTS Shape')) +
   scale_y_continuous(name = 'Density') +
-  theme(legend.title = element_blank()) +
   coord_cartesian(clip = 'off',
                   ylim = c(0, 2.55))
 rts_shape_hist
@@ -1747,11 +1741,11 @@ rts_area_shape_hist
 ```{r}
 rts_summaries <- polys %>%
   as_tibble() %>%
-  group_by(yg) %>%
   summarise(mean_size = mean(rts_area),
             min_size = min(rts_area),
             max_size = max(rts_area),
-            median_size = median(rts_area))
+            median_size = median(rts_area),
+            .by = 'yg')
 knitr::kable(rts_summaries)
 ```
 
@@ -1932,6 +1926,28 @@ ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
 ```
 
 
+## Undetected Features
+
+```{r}
+knitr::kable(
+  polys %>%
+    ungroup() %>%
+    filter(rts_iou == 0) %>%
+    summarise(missed_feature_count = n(),
+              max_area = max(rts_area),
+              .by = 'imagery')
+)
+
+knitr::kable(
+  polys %>%
+    ungroup() %>%
+    filter(rts_iou == 0) %>%
+    summarise(missed_feature_count = n(),
+              .by = c('imagery', 'yg'))
+)
+```
+
+
 ## Active vs. General RTS Performance
 
 ```{r}
@@ -2103,8 +2119,10 @@ min_rts_area <- iou_ci %>%
                         .by = imagery) %>%
               select(imagery, rts_iou_median),
             by = 'imagery') %>%
-  filter(abs(prediction - rts_iou_median) == min(abs(prediction - rts_iou_median)),
-         .by = imagery) %>%
+  filter(
+    abs(prediction - rts_iou_median) == min(abs(prediction - rts_iou_median)),
+         .by = imagery
+    ) %>%
   left_join(size_thresholds %>%
               mutate(rts_threshold = ceiling(rts_threshold/100)*100),
             by = 'imagery') %>%
@@ -2135,7 +2153,7 @@ ggplot(polys,
        aes(x = rts_area, 
            y = rts_iou)) +
   geom_point(aes(color = pq_ci, shape = yg), size = 1) +
-  scale_color_manual(name = 'Prediction Quality',
+  scale_color_manual(name = 'Prediction\nQuality',
                      values = pq_colors) +
   new_scale('color') +
   geom_ribbon(data = iou_ci,
@@ -2155,6 +2173,7 @@ ggplot(polys,
                      expand = expansion(mult = 0),
                      minor_breaks = seq(-0.1, 1, by = 0.05)) +
   scale_shape_manual(name = 'Region',
+                     labels = c('Other', 'Yamal/\nGydan'),
                      values = c(1, 16)) +
   facet_grid(. ~ imagery) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
@@ -2281,7 +2300,7 @@ polys <- polys %>%
                      levels = c(unique(rts_pq$id))))
 ```
 
-```{r}
+```{r, fig.height = 1.75, fig.width = 6.5}
 ggplot(polys, 
        aes(x = id, y = pq_ci_offset, color = imagery)) +
   geom_point() +
@@ -2289,18 +2308,18 @@ ggplot(polys,
                   breaks = c(1, 2, 3),
                   labels = pq_labels) +
   scale_x_discrete(name = 'RTS Features') +
-  scale_color_manual(values = imagery_colors) +
+  scale_color_manual(name = 'Imagery',
+                     values = imagery_colors) +
   # facet_grid(name_long ~ ., scales = 'free_y') +
   theme(axis.text.x = element_blank(),
-        legend.title = element_blank(),
         panel.grid.major.y = element_blank()) +
   coord_fixed(ratio = 7)
 
 # ggsave('./figures/prediction_quality_by_imagery.pdf',
-#        height = 2,
+#        height = 1.75,
 #        width = 6.5)
 # ggsave('./figures/prediction_quality_by_imagery.jpg',
-#        height = 2,
+#        height = 1.75,
 #        width = 6.5)
 ```
 
@@ -2376,6 +2395,7 @@ lm_output <- zonal_stats %>%
 zonal_stats_contrasts <- lm_output %>%
   select(imagery, rts_class, variable, contrasts_pq) %>%
   unnest(cols = c(contrasts_pq)) %>%
+  ungroup() %>%
   filter(p_value <= 0.1) %>%
   separate_wider_delim(contrast, 
                        delim = ' - ', 
@@ -2410,12 +2430,16 @@ zonal_stats_limits <- zonal_stats %>%
 ```{r}
 zonal_stats_contrasts <- zonal_stats_contrasts %>%
   left_join(zonal_stats_limits, by = c('variable', 'rts_class')) %>%
-  group_by(imagery, rts_class, variable) %>%
   mutate(n = n(),
-         y = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.2,
-                       TRUE ~ lwr + (upr - lwr)*1.05),
-         upr = case_when(n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.3,
-                         TRUE ~ lwr + (upr - lwr)*1.15))
+         y = case_when(
+           n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.2,
+           TRUE ~ lwr + (upr - lwr)*1.05
+           ),
+         upr = case_when(
+           n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.3,
+           TRUE ~ lwr + (upr - lwr)*1.15),
+         .by = c(imagery, rts_class, variable)
+         )
 
 # add new upr limits back to limits tibble
 zonal_stats_limits <- zonal_stats_limits %>%
@@ -3192,12 +3216,17 @@ ggplot(polys,
        aes(x = rts_shape, y = rts_area, color = pq_ci, shape = yg)) +
   geom_point() +
   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
-  scale_y_log10(name = expression('RTS Area (m'^2 * ')')) +
+  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
+                minor_breaks = c(seq(100, 900, by = 100),
+                           seq(1000, 9000, by = 1000),
+                           seq(10000, 90000, by = 10000),
+                           seq(100000, 200000, by = 100000))) +
   scale_color_manual(name = 'Prediction Quality',
                      values = pq_colors) +
   scale_shape_manual(name = 'Region',
                      values = c(1, 16)) +
-  facet_grid(. ~ imagery)
+  facet_grid(. ~ imagery) +
+  theme(axis.text.y = element_text(angle = 90))
 ```
 
 ```{r}
@@ -3206,11 +3235,17 @@ rts_shape_area_iou <- ggplot(polys,
   geom_point() +
   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
   scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
-                labels = scales::label_number(big.mark = '')) +
+                labels = scales::label_number(big.mark = ''),
+                minor_breaks = c(seq(100, 900, by = 100),
+                           seq(1000, 9000, by = 1000),
+                           seq(10000, 90000, by = 10000),
+                           seq(100000, 200000, by = 100000))) +
   scale_color_viridis(name = 'RTS IoU') +
   scale_shape_manual(name = 'Region',
-                     values = c(1, 16)) +
-  facet_grid(. ~ imagery)
+                     values = c(1, 16),
+                     labels = c('Other', 'Yamal/\nGydan')) +
+  facet_grid(. ~ imagery) +
+  theme(axis.text.y = element_text(angle = 90, hjust = 0.5))
 rts_shape_area_iou
 
 # ggsave('./figures/rts_shape_area.pdf',
@@ -3344,13 +3379,14 @@ ggplot(aes(x = ndwi_mean, y = rts_area, color = yg)) +
 
 All models are tripped up by the Yamal/Gydan Region.
 
-```{r}
+```{r, fig.height = 4, fig.width = 6.5}
 rts_pq_hist <- ggplot(polys,
        aes(x = yg, fill = pq_ci)) +
   geom_bar(position = 'fill') +
   scale_x_discrete(name = 'Region') +
-  scale_y_continuous(labels = scales::percent) +
-  scale_fill_manual(name = 'Prediction Quality',
+  scale_y_continuous(labels = scales::percent,
+                     minor_breaks = seq(0, 1, by = 0.05)) +
+  scale_fill_manual(name = 'Prediction\nQuality',
                     values = pq_colors) +
   facet_grid(. ~ imagery) +
   theme(axis.title.y = element_blank())
@@ -3456,8 +3492,8 @@ In the RTS features which had different prediction qualities across all three mo
 ```{r}
 polys <- polys %>%
   as_tibble() %>%
-  group_by(id) %>%
-  mutate(pq_n_unique = length(unique(pq_ci)))
+  mutate(pq_n_unique = length(unique(pq_ci)),
+         .by = id)
 
 rts_ids <- polys %>%
   filter(pq_n_unique == 3) %>%
@@ -3521,18 +3557,7 @@ ggplot(polys, aes(x = rts_shape, y = pq_n_unique)) +
 ```
 
 
-## Plot Features
-
-Visualize the RTS predictions
-
-```{r fig.width = 12, fig.height = 4.8}
-rts_maps <- map(pred_ids,
-                 ~ plot_prediction(.x))
-walk(rts_maps,
-     ~ print(.x))
-```
-
-Selection of RTS Maps
+## RTS Subset Maps
 
 ```{r}
 id_subset <- c(
@@ -3547,11 +3572,22 @@ id_subset <- c(
     "00000000000000000016"
   )
 
-map_dimensions <- input_data %>%
+# map_dimensions <- input_data %>%
+#   filter(id %in% id_subset) %>%
+#   summarise(x_spread = max(x) - min(x),
+#             y_spread = max(y) - min(y),
+#             .by = c('id')) %>%
+#   summarise(x_spread_max = max(x_spread),
+#             y_spread_max = max(y_spread))
+
+map_dimensions <- polys %>%
   filter(id %in% id_subset) %>%
-  summarise(x_spread = max(x) - min(x),
-            y_spread = max(y) - min(y),
-            .by = c('id')) %>%
+  st_as_sf(crs = 3413) %>%
+  bind_cols(map_dfr(.$rts_geometry, 
+               ~ st_bbox(.x))) %>%
+  as_tibble() %>%
+  mutate(x_spread = (xmax - xmin)*1.25,
+         y_spread = (ymax - ymin)*1.25) %>%
   summarise(x_spread_max = max(x_spread),
             y_spread_max = max(y_spread))
 
@@ -3601,6 +3637,18 @@ rts_highlights_plot
 #        rts_highlights_plot,
 #        height = 9,
 #        width = 6.5)
+```
+
+
+## Plot Features
+
+Visualize the RTS predictions
+
+```{r fig.width = 12, fig.height = 4.8}
+rts_maps <- map(pred_ids,
+                 ~ plot_prediction(.x))
+walk(rts_maps,
+     ~ print(.x))
 ```
 
 Maxar High Quality Predictions
