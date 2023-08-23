@@ -8,7 +8,7 @@ output:
 
 ## TODO:
 
--   Finalize RTS sample figure. Show outlines of predictions for all features within one tile?
+-   Finalize RTS sample figure. Show outlines of predictions for all features within one tile? Fix RTS label justification when ggplot2 is next updated. Make the figure narrower? 
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -911,8 +911,8 @@ val_as_poly <- function(prediction) {
 ## Prep Plot Variables
 
 ```{r}
-imagery_labels <- c('Maxar', 'Planet', 'Sentinel-2')
-imagery_labeller <- c('Maxar' = 'Maxar', 'Planet' = 'Planet', 'Sentinel-2' = 'Sentinel-2')
+imagery_labels <- c('WorldView', 'PlanetScope', 'Sentinel-2')
+imagery_labeller <- c('WorldView' = 'WorldView', 'PlanetScope' = 'PlanetScope', 'Sentinel-2' = 'Sentinel-2')
 imagery_colors <- c('#FFCC00', '#0099AA', '#0000AA')
 
 # prediction quality (pq)
@@ -952,7 +952,7 @@ loc_filepaths <- list.files(loc_dir,
                             full.names = TRUE,
                             recursive = TRUE)
 
-# Maxar
+# WorldView
 maxar_pred_files <- loc_filepaths[
   str_detect(loc_filepaths, 
              paste0(maxar_pred_dir))
@@ -964,7 +964,7 @@ maxar_input_files <- loc_filepaths[
                     gd_maxar_input_folders$name[2], ')'))
 ]
 
-# Planet
+# PlanetScope
 planet_pred_files <- loc_filepaths[
   str_detect(loc_filepaths, 
              paste0(planet_pred_dir))
@@ -998,7 +998,7 @@ if (length(maxar_pred_files) == length(planet_pred_files) &
   
 } else {
   
-  # download Maxar predictions
+  # download WorldView predictions
   maxar_pred_filepath <- paste0(loc_dir, '/maxar/predictions-', maxar_pred_dir)
   maxar_pred_files <- drive_ls(gd_pred_folders %>%
                                  filter(str_detect(name, 'MAXAR')),
@@ -1015,7 +1015,7 @@ if (length(maxar_pred_files) == length(planet_pred_files) &
                                  pattern = 'tif$',
                                  full.names = TRUE)
   
-  # download Planet predictions
+  # download PlanetScope predictions
   planet_pred_filepath <- paste0(loc_dir, '/planet/predictions-', planet_pred_dir)
   planet_pred_files <- drive_ls(gd_pred_folders %>%
                                   filter(str_detect(name, 'PLANET')),
@@ -1063,7 +1063,7 @@ if (length(maxar_input_files) == length(planet_input_files) &
   
 } else {
   
-  # Download Maxar Input Data Layers  
+  # Download WorldView Input Data Layers  
   maxar_input_filepaths <- paste0(loc_dir, '/maxar/', gd_maxar_input_folders$name)
   
   maxar_input_files <- drive_ls(gd_maxar_input_folders %>%
@@ -1094,7 +1094,7 @@ if (length(maxar_input_files) == length(planet_input_files) &
                                         full.names = TRUE))
   maxar_input_files <- unlist(maxar_input_files)
   
-  # Download Planet Input Data Layers  
+  # Download PlanetScope Input Data Layers  
   planet_input_filepaths <- paste0(loc_dir, '/planet/', gd_planet_input_folders$name)
   
   planet_input_files <- drive_ls(gd_planet_input_folders %>%
@@ -1161,7 +1161,7 @@ if (length(maxar_input_files) == length(planet_input_files) &
 rm(gd_maxar_input_folders, gd_planet_input_folders, gd_sentinel_input_folders)
 ```
 
-### Maxar GeoTiffs
+### WorldView GeoTiffs
 
 ```{r, include = FALSE}
 maxar_pred_dir_zscore <- 'MAXAR20230623_161858_p25062023'
@@ -1202,7 +1202,7 @@ rm(maxar_input_files, ids)
 ```
 
 
-### Planet GeoTiffs
+### PlanetScope GeoTiffs
 
 ```{r, include = FALSE}
 planet_preds <- map(planet_pred_files, ~ import_pred(.x))
@@ -1246,7 +1246,7 @@ rm(sentinel_input_files, ids)
 rts_outlines <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.shp') %>%
   st_transform(crs = 3413) %>%
   select(id = ID, region, status = Act_or_Gen, code_id, rts_area = Shape_Area, 
-         Long) %>%
+         Long, Lat) %>%
   mutate(
     rts_shape = as.numeric(4*pi*st_area(geometry)/st_perimeter(geometry)^2) # calculate Polsby-Popper value (shape compactness/roundness)
     )  %>%
@@ -1265,12 +1265,12 @@ knitr::kable(gen_vs_act_tiles, align = 'cc')
 ```{r}
 maxar_tiles <- maxar_preds %>%
   map_dfr(~ bbox(.x)) %>%
-  mutate(imagery = 'Maxar') %>%
+  mutate(imagery = 'WorldView') %>%
   select(id, imagery, bbox_geometry)
 
 planet_tiles <- planet_preds %>%
   map_dfr(~ bbox(.x)) %>%
-  mutate(imagery = 'Planet') %>%
+  mutate(imagery = 'PlanetScope') %>%
   select(id, imagery, bbox_geometry)
 
 sentinel_tiles <- sentinel_preds %>%
@@ -1307,7 +1307,7 @@ maxar_pred_polys <- maxar_preds %>%
       .x
       )
     ) %>%
-  mutate(imagery = 'Maxar')
+  mutate(imagery = 'WorldView')
 
 maxar_pred_polys_zscore <- maxar_preds_zscore %>%
   map_dfr(
@@ -1315,7 +1315,7 @@ maxar_pred_polys_zscore <- maxar_preds_zscore %>%
       .x
       )
     ) %>%
-  mutate(imagery = 'Maxar')
+  mutate(imagery = 'WorldView')
 
 planet_pred_polys <- planet_preds %>%
   map_dfr(
@@ -1323,7 +1323,7 @@ planet_pred_polys <- planet_preds %>%
       .x
       )
     ) %>%
-  mutate(imagery = 'Planet')
+  mutate(imagery = 'PlanetScope')
 
 sentinel_pred_polys <- sentinel_preds %>%
   map_dfr(
@@ -1355,11 +1355,11 @@ rm(maxar_pred_polys, planet_pred_polys, sentinel_pred_polys, pred_polys)
 ```{r}
 maxar_val_polys <- maxar_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
-  mutate(imagery = 'Maxar')
+  mutate(imagery = 'WorldView')
 
 planet_val_polys <- planet_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
-  mutate(imagery = 'Planet')
+  mutate(imagery = 'PlanetScope')
 
 sentinel_val_polys <- sentinel_preds %>%
   map_dfr(~ val_as_poly(.x)) %>%
@@ -1398,23 +1398,23 @@ sentinel_masks <- sentinel_input %>%
 
 masks <- maxar_masks %>%
   map2_dfr(pred_ids, ~ mask_as_df(.x, .y)) %>%
-  mutate(imagery = 'Maxar') %>%
+  mutate(imagery = 'WorldView') %>%
   rbind(planet_masks %>%
           map2_dfr(pred_ids, ~ mask_as_df(.x, .y)) %>%
-          mutate(imagery = 'Planet')) %>%
+          mutate(imagery = 'PlanetScope')) %>%
   rbind(sentinel_masks %>%
           map2_dfr(pred_ids, ~ mask_as_df(.x, .y)) %>%
           mutate(imagery = 'Sentinel-2'))
 
 masks_df <- pmap(list(maxar_masks, pred_ids),
                  \(a, b) (as.data.frame(a, xy = TRUE) %>%
-                            mutate(imagery = 'Maxar',
+                            mutate(imagery = 'WorldView',
                                    id = b) %>%
                             select(imagery, id, x, y, mask = layer))) %>%
   list_rbind() %>%
   rbind(pmap(list(planet_masks, pred_ids),
              \(a, b) (as.data.frame(a, xy = TRUE) %>%
-                        mutate(imagery = 'Planet',
+                        mutate(imagery = 'PlanetScope',
                                id = b) %>%
                         select(imagery, id, x, y, mask = layer))) %>%
           list_rbind()) %>%
@@ -1423,7 +1423,11 @@ masks_df <- pmap(list(maxar_masks, pred_ids),
                         mutate(imagery = 'Sentinel-2',
                                id = b) %>%
                         select(imagery, id, x, y, mask = layer))) %>%
-          list_rbind())
+          list_rbind()) %>%
+  mutate(imagery = factor(
+    imagery,
+    levels = c('WorldView', 'PlanetScope', 'Sentinel-2')
+  ))
 ```
 
 ```{r}
@@ -1439,15 +1443,17 @@ polys <- polys %>%
          pred_bg_geometry = st_as_sfc(pmap(list(pred_bg_geometry, 
                                                  mask_geometry), 
                                             ~ st_intersection(...)),
-                                       crs = crs(polys))) %>%
-  mutate(val_mask_geometry = st_as_sfc(pmap(list(val_geometry, 
+                                       crs = crs(polys)),
+         val_mask_geometry = st_as_sfc(pmap(list(val_geometry, 
                                                  mask_geometry), 
                                             ~ st_intersection(...)),
                                        crs = crs(polys)),
          val_bg_mask_geometry = st_as_sfc(pmap(list(val_bg_geometry, 
                                                     mask_geometry), 
                                                ~ st_intersection(...)),
-                                          crs = crs(polys)))
+                                          crs = crs(polys)),
+         imagery = factor(imagery,
+                          levels = c('WorldView', 'PlanetScope', 'Sentinel-2')))
 rm(masks)
 ```
 
@@ -1459,13 +1465,13 @@ input_data <- pmap(list(x = maxar_input,
                         y = maxar_preds),
                    \(x, y) input_as_df(x, y)) %>%
   list_rbind() %>%
-  mutate(imagery = 'Maxar') %>%
+  mutate(imagery = 'WorldView') %>%
   rbind(
     pmap(list(x = planet_input, 
               y = planet_preds),
          \(x, y) input_as_df(x, y)) %>%
       list_rbind() %>%
-      mutate(imagery = 'Planet')
+      mutate(imagery = 'PlanetScope')
   ) %>%
   rbind(
     pmap(list(x = sentinel_input, 
@@ -1474,6 +1480,10 @@ input_data <- pmap(list(x = maxar_input,
       list_rbind() %>%
       mutate(imagery = 'Sentinel-2')
   ) %>%
+  mutate(imagery = factor(
+    imagery,
+    levels = c('WorldView', 'PlanetScope', 'Sentinel-2'))
+    ) %>%
   select(imagery, id, rts_class, x, y, 
          r, g, b, lum, nir, ndvi, ndwi, elev, sr, 
          r_stretch, g_stretch, b_stretch, color_hex, prediction)
@@ -1532,9 +1542,9 @@ IoU (Calculated in Model)
 
 |Imagery (normalization method)|Test IoU|Val IoU|
 |:---:|:---:|:---:|
-|Maxar (0-1)|0.75|0.69|
-|Maxar (z-score)|0.73|0.72|
-|Planet (0-1)|0.71|0.70|
+|WorldView (0-1)|0.75|0.69|
+|WorldView (z-score)|0.73|0.72|
+|PlanetScope (0-1)|0.71|0.70|
 |Sentinel-2 (0-1)|0.68|0.66|
 
 
@@ -1569,7 +1579,8 @@ imagery_performance_summary <- polys %>%
             rts_iou_median = median(rts_iou),
             rts_iou_sd = sd(rts_iou),
             mean_iou_median = median(mean_iou),
-            mean_iou_sd = sd(mean_iou))
+            mean_iou_sd = sd(mean_iou),
+            .by = imagery)
 
 ggplot(polys,
        aes(x = rts_iou, fill = imagery)) +
@@ -1646,9 +1657,10 @@ polys <- polys %>%
 # 
 # ggplot() +
 #   geom_sf(data = world_north, fill = 'transparent') +
-#   geom_sf(data = rts_outlines,
-#           aes(color = yg),
-#           linewidth = 1)
+#   geom_sf(data = polys,
+#           aes(geometry = rts_geometry, color = yg),
+#           linewidth = 1,
+#           inherit.aes = FALSE)
 ```
 
 ```{r, include = FALSE}
@@ -1757,7 +1769,7 @@ Run `nls` models and bootstrap parameters
 # maxar_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
 #                data = polys %>%
-#                  filter(imagery == 'Maxar'))
+#                  filter(imagery == 'WorldView'))
 # 
 # maxar_iou_boot <- nlsBoot(maxar_iou_nls, 500000)
 # saveRDS(maxar_iou_nls, './data/models/maxar_iou_nls.RData')
@@ -1772,7 +1784,7 @@ summary(maxar_iou_nls)
 # planet_iou_nls <- nls(rts_iou ~ Vmax * rts_area / (Km + rts_area),
 #                start = list(Km = 50, Vmax = 2),
 #                data = polys %>%
-#                  filter(imagery == 'Planet'))
+#                  filter(imagery == 'PlanetScope'))
 # 
 # planet_iou_boot <- nlsBoot(planet_iou_nls, 500000)
 # saveRDS(planet_iou_nls, './data/models/planet_iou_nls.RData')
@@ -1802,9 +1814,9 @@ Table for nls model summaries
 
 ```{r}
 rts_iou_summary <- tidy(maxar_iou_nls) %>%
-  mutate(Imagery = 'Maxar') %>%
+  mutate(Imagery = 'WorldView') %>%
   rbind(tidy(planet_iou_nls) %>%
-          mutate(Imagery = 'Planet')) %>%
+          mutate(Imagery = 'PlanetScope')) %>%
   rbind(tidy(sentinel_iou_nls) %>%
           mutate(Imagery = 'Sentinel-2')) %>%
   mutate(across(estimate:p.value, ~ round(.x, 3)),
@@ -1872,12 +1884,12 @@ iou_predictions <- rbind(
   my_nlsBootPredict(maxar_iou_boot, 
                     polys %>%
                       as_tibble() %>%
-                      filter(imagery == 'Maxar'),
+                      filter(imagery == 'WorldView'),
                     interval = 'prediction'),
   my_nlsBootPredict(planet_iou_boot, 
                     polys %>%
                       as_tibble() %>%
-                      filter(imagery == 'Planet'),
+                      filter(imagery == 'PlanetScope'),
                     interval = 'prediction'),
   my_nlsBootPredict(sentinel_iou_boot, 
                     polys %>%
@@ -1898,11 +1910,13 @@ polys <- polys %>%
 
 ```{r}
 iou_ci <- maxar_iou_ci %>%
-  mutate(imagery = 'Maxar') %>%
+  mutate(imagery = 'WorldView') %>%
   rbind(planet_iou_ci %>%
-          mutate(imagery = 'Planet')) %>%
+          mutate(imagery = 'PlanetScope')) %>%
   rbind(sentinel_iou_ci %>%
-          mutate(imagery = 'Sentinel-2'))
+          mutate(imagery = 'Sentinel-2')) %>%
+  mutate(imagery = factor(imagery,
+                          levels = c('WorldView', 'PlanetScope', 'Sentinel-2')))
 
 rm(maxar_iou_ci, planet_iou_ci, sentinel_iou_ci, newdata)
 ```
@@ -1931,7 +1945,7 @@ ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
 ```{r}
 knitr::kable(
   polys %>%
-    ungroup() %>%
+    as_tibble() %>%
     filter(rts_iou == 0) %>%
     summarise(missed_feature_count = n(),
               max_area = max(rts_area),
@@ -1940,7 +1954,7 @@ knitr::kable(
 
 knitr::kable(
   polys %>%
-    ungroup() %>%
+    as_tibble() %>%
     filter(rts_iou == 0) %>%
     summarise(missed_feature_count = n(),
               .by = c('imagery', 'yg'))
@@ -2055,7 +2069,7 @@ sentinel_cross <- sentinel_est %>%
   select(rts_area) %>%
   as.numeric() # find closest to 1e-05
 
-size_thresholds <- tibble(imagery = c('Maxar', 'Planet', 'Sentinel-2'),
+size_thresholds <- tibble(imagery = c('WorldView', 'PlanetScope', 'Sentinel-2'),
                           rts_threshold = c(maxar_cross, 
                                             planet_cross, 
                                             sentinel_cross))
@@ -2068,26 +2082,26 @@ rm(maxar_d1, planet_d1, sentinel_d1,
 ```{r}
 rts_iou_thresholds <- polys %>%
   as_tibble() %>%
-  group_by(imagery) %>%
   summarise(rts_iou_mean = mean(rts_iou),
-            rts_sd = sd(rts_iou)) %>%
+            rts_sd = sd(rts_iou),
+            .by = imagery) %>%
   mutate(rts_iou_threshold = rts_iou_mean)
 
 polys <- polys %>%
   mutate(
     size_threshold = case_when(
-      imagery == 'Maxar' ~ 
-        filter(size_thresholds, imagery == 'Maxar')$rts_threshold,
-      imagery == 'Planet' ~ 
-        filter(size_thresholds, imagery == 'Planet')$rts_threshold,
+      imagery == 'WorldView' ~ 
+        filter(size_thresholds, imagery == 'WorldView')$rts_threshold,
+      imagery == 'PlanetScope' ~ 
+        filter(size_thresholds, imagery == 'PlanetScope')$rts_threshold,
       imagery == 'Sentinel-2' ~ 
         filter(size_thresholds, imagery == 'Sentinel-2')$rts_threshold
     ),
     iou_threshold = case_when(
-      imagery == 'Maxar' ~ 
-        filter(rts_iou_thresholds, imagery == 'Maxar')$rts_iou_threshold,
-      imagery == 'Planet' ~ 
-        filter(rts_iou_thresholds, imagery == 'Planet')$rts_iou_threshold,
+      imagery == 'WorldView' ~ 
+        filter(rts_iou_thresholds, imagery == 'WorldView')$rts_iou_threshold,
+      imagery == 'PlanetScope' ~ 
+        filter(rts_iou_thresholds, imagery == 'PlanetScope')$rts_iou_threshold,
       imagery == 'Sentinel-2' ~ 
         filter(rts_iou_thresholds, imagery == 'Sentinel-2')$rts_iou_threshold
     ),
@@ -2230,8 +2244,8 @@ Is performance class the same across imagery sources for most RTS features?
 polys <- polys %>%
   mutate(
     pq_ci_offset = case_when(
-      imagery == 'Maxar' ~ as.numeric(pq_ci) - 0.2,
-      imagery == 'Planet' ~ as.numeric(pq_ci),
+      imagery == 'WorldView' ~ as.numeric(pq_ci) - 0.2,
+      imagery == 'PlanetScope' ~ as.numeric(pq_ci),
       imagery == 'Sentinel-2' ~ as.numeric(pq_ci) + 0.2
       )
     )
@@ -2265,29 +2279,29 @@ rts_pq <- polys %>%
          .by = id) %>%
   mutate(
     plotting_order = case_when(
-      High == 2 & Low == 1 & imagery_low == 'Maxar' ~ 1,
-      High == 2 & Low == 1 & imagery_low == 'Planet' ~ 2,
+      High == 2 & Low == 1 & imagery_low == 'WorldView' ~ 1,
+      High == 2 & Low == 1 & imagery_low == 'PlanetScope' ~ 2,
       High == 2 & Low == 1 & imagery_low == 'Sentinel-2' ~ 3,
       High == 3 ~ 4,
-      High == 2 & Expected == 1 & imagery_expected == 'Maxar' ~ 5,
-      High == 2 & Expected == 1 & imagery_expected == 'Planet' ~ 6,
+      High == 2 & Expected == 1 & imagery_expected == 'WorldView' ~ 5,
+      High == 2 & Expected == 1 & imagery_expected == 'PlanetScope' ~ 6,
       High == 2 & Expected == 1 & imagery_expected == 'Sentinel-2' ~ 7,
-      Expected == 2 & High == 1 & imagery_high == 'Maxar' ~ 8,
-      Expected == 2 & High == 1 & imagery_high == 'Planet' ~ 9,
+      Expected == 2 & High == 1 & imagery_high == 'WorldView' ~ 8,
+      Expected == 2 & High == 1 & imagery_high == 'PlanetScope' ~ 9,
       Expected == 2 & High == 1 & imagery_high == 'Sentinel-2' ~ 10,
       Expected == 3 ~ 11,
-      Expected == 2 & Low == 1 & imagery_low == 'Maxar' ~ 12,
-      Expected == 2 & Low == 1 & imagery_low == 'Planet' ~ 13,
+      Expected == 2 & Low == 1 & imagery_low == 'WorldView' ~ 12,
+      Expected == 2 & Low == 1 & imagery_low == 'PlanetScope' ~ 13,
       Expected == 2 & Low == 1 & imagery_low == 'Sentinel-2' ~ 14,
-      Low == 2 & Expected == 1 & imagery_expected == 'Maxar' ~ 15,
-      Low == 2 & Expected == 1 & imagery_expected == 'Planet' ~ 16,
+      Low == 2 & Expected == 1 & imagery_expected == 'WorldView' ~ 15,
+      Low == 2 & Expected == 1 & imagery_expected == 'PlanetScope' ~ 16,
       Low == 2 & Expected == 1 & imagery_expected == 'Sentinel-2' ~ 17,
       Low == 3 ~ 18,
-      Low == 2 & High == 1 & imagery_high == 'Maxar' ~ 19,
-      Low == 2 & High == 1 & imagery_high == 'Planet' ~ 20,
+      Low == 2 & High == 1 & imagery_high == 'WorldView' ~ 19,
+      Low == 2 & High == 1 & imagery_high == 'PlanetScope' ~ 20,
       Low == 2 & High == 1 & imagery_high == 'Sentinel-2' ~ 21,
-      max_n == 1 & imagery_low == 'Maxar' ~ 22,
-      max_n == 1 & imagery_low == 'Planet' ~ 23,
+      max_n == 1 & imagery_low == 'WorldView' ~ 22,
+      max_n == 1 & imagery_low == 'PlanetScope' ~ 23,
       max_n == 1 & imagery_low == 'Sentinel-2' ~ 24
     )
   ) %>%
@@ -2478,7 +2492,7 @@ names(zonal_stats_figs) <- variables
 
 A few takeaway points:
 
-- Brighter RTS against a darker background are predicted better in the Planet model. Doesn't seem to be related to seasonality.
+- Brighter RTS against a darker background are predicted better in the PlanetScope model. Doesn't seem to be related to seasonality.
 
 ```{r, fig.width = 7, fig.height = 6}
 zonal_stats_figs[['r_mean']]
@@ -2523,7 +2537,7 @@ zonal_stats_figs[['lum_mean']]
 #        width = 6.5)
 ```
 
--   Poorly predicted RTS in the Planet and Sentinel models had higher NIR values within features. Both plants and soil reflect a lot of NIR... so what this means is a bit unclear.
+-   Poorly predicted RTS in the PlanetScope and Sentinel models had higher NIR values within features. Both plants and soil reflect a lot of NIR... so what this means is a bit unclear.
 
 ```{r, fig.width = 7, fig.height = 6}
 zonal_stats_figs[['nir_mean']]
@@ -2559,7 +2573,7 @@ zonal_stats_figs[['sr_sd']]
 ### Prediction Probability
 
 ```{r}
-rts_labeller <- as_labeller(c(Maxar = 'Maxar', Planet = 'Planet', `Sentinel-2` = '`Sentinel-2`',
+rts_labeller <- as_labeller(c(WorldView = 'WorldView', PlanetScope = 'PlanetScope', `Sentinel-2` = '`Sentinel-2`',
                               rts = 'RTS', bg = 'Background'),
                             default = label_parsed)
 
@@ -2622,7 +2636,7 @@ ggplot(input_data %>%
 
 ```{r}
 ggplot(input_data %>%
-         filter(mask == 1 & imagery == 'Maxar'), 
+         filter(mask == 1 & imagery == 'WorldView'), 
        aes(x = nir, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2634,10 +2648,10 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  ggtitle('Maxar')
+  ggtitle('WorldView')
 
 ggplot(input_data %>%
-         filter(mask == 1 & imagery == 'Planet'), 
+         filter(mask == 1 & imagery == 'PlanetScope'), 
        aes(x = nir, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2649,7 +2663,7 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  ggtitle('Planet')
+  ggtitle('PlanetScope')
 
 ggplot(input_data %>%
          filter(mask == 1 & imagery == 'Sentinel-2'), 
@@ -2667,7 +2681,7 @@ ggplot(input_data %>%
   ggtitle('Sentinel-2')
 
 ggplot(input_data %>%
-         filter(mask == 1 & imagery == 'Maxar'), 
+         filter(mask == 1 & imagery == 'WorldView'), 
        aes(x = ndvi, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2679,10 +2693,10 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  ggtitle('Maxar')
+  ggtitle('WorldView')
 
 ggplot(input_data %>%
-         filter(mask == 1 & imagery == 'Planet'), 
+         filter(mask == 1 & imagery == 'PlanetScope'), 
        aes(x = ndvi, y = prediction)) +
   geom_bin_2d() +
   scale_fill_gradient(name = 'Count',
@@ -2694,7 +2708,7 @@ ggplot(input_data %>%
   scale_y_continuous(name = 'Prediction') +
   geom_hline(yintercept = 0.5, linetype = 'dashed') +
   facet_grid(rts_class ~ pq_ci) +
-  ggtitle('Planet')
+  ggtitle('PlanetScope')
 
 ggplot(input_data %>%
          filter(mask == 1 & imagery == 'Sentinel-2'), 
@@ -2865,11 +2879,11 @@ plot_ly(zonal_stats_class,
                       zaxis = list(title = 'PC3')))
 ```
 
-Maxar
+WorldView
 
 ```{r}
 plot_ly(zonal_stats_class %>%
-          filter(imagery == 'Maxar'), 
+          filter(imagery == 'WorldView'), 
         x = ~PC1, y = ~PC2, z = ~PC3, 
         color = ~pq_ci,
         colors = pq_colors,
@@ -2882,11 +2896,11 @@ plot_ly(zonal_stats_class %>%
                       zaxis = list(title = 'PC3')))
 ```
 
-Planet
+PlanetScope
 
 ```{r}
 plot_ly(zonal_stats_class %>%
-          filter(imagery == 'Planet'), 
+          filter(imagery == 'PlanetScope'), 
         x = ~PC1, y = ~PC2, z = ~PC3, 
         color = ~pq_ci,
         colors = pq_colors,
@@ -2980,11 +2994,11 @@ plot_ly(zonal_stats_class,
                       zaxis = list(title = 'PC3')))
 ```
 
-Maxar
+WorldView
 
 ```{r}
 plot_ly(zonal_stats_class %>%
-          filter(imagery == 'Maxar'), 
+          filter(imagery == 'WorldView'), 
         x = ~PC1, y = ~PC2, z = ~PC3, 
         color = ~prediction_mean_rts,
         symbol = ~rts_class,
@@ -2996,11 +3010,11 @@ plot_ly(zonal_stats_class %>%
                       zaxis = list(title = 'PC3')))
 ```
 
-Planet
+PlanetScope
 
 ```{r}
 plot_ly(zonal_stats_class %>%
-          filter(imagery == 'Planet'), 
+          filter(imagery == 'PlanetScope'), 
         x = ~PC1, y = ~PC2, z = ~PC3, 
         color = ~prediction_mean_rts,
         symbol = ~rts_class,
@@ -3271,33 +3285,33 @@ rts_shape_area_iou
 polys <- polys %>%
   mutate(rts_area_log10 = log10(rts_area))
 
-# Maxar models
+# WorldView models
 maxar_lm_smallest <- lm(rts_iou ~ 1,
                         data = polys %>%
-                          filter(imagery == 'Maxar'))
+                          filter(imagery == 'WorldView'))
 maxar_lm_area <- lm(rts_iou ~ rts_area_log10,
                         data = polys %>%
-                          filter(imagery == 'Maxar'))
+                          filter(imagery == 'WorldView'))
 maxar_lm_area_shape <- lm(rts_iou ~ rts_area_log10 + rts_shape,
                           data = polys %>%
-                            filter(imagery == 'Maxar'))
+                            filter(imagery == 'WorldView'))
 maxar_lm_interaction <- lm(rts_iou ~ rts_area_log10*rts_shape,
                            data = polys %>%
-                             filter(imagery == 'Maxar'))
+                             filter(imagery == 'WorldView'))
 
-# Planet models
+# PlanetScope models
 planet_lm_smallest <- lm(rts_iou ~ 1,
                         data = polys %>%
-                          filter(imagery == 'Planet'))
+                          filter(imagery == 'PlanetScope'))
 planet_lm_area <- lm(rts_iou ~ rts_area_log10,
                         data = polys %>%
-                          filter(imagery == 'Planet'))
+                          filter(imagery == 'PlanetScope'))
 planet_lm_area_shape <- lm(rts_iou ~ rts_area_log10 + rts_shape,
                           data = polys %>%
-                            filter(imagery == 'Planet'))
+                            filter(imagery == 'PlanetScope'))
 planet_lm_interaction <- lm(rts_iou ~ rts_area_log10*rts_shape,
                            data = polys %>%
-                             filter(imagery == 'Planet'))
+                             filter(imagery == 'PlanetScope'))
 
 # Sentinel models
 sentinel_lm_smallest <- lm(rts_iou ~ 1,
@@ -3313,35 +3327,35 @@ sentinel_lm_interaction <- lm(rts_iou ~ rts_area_log10*rts_shape,
                            data = polys %>%
                              filter(imagery == 'Sentinel-2'))
 
-iou_lm_output <- tibble(Imagery = 'Maxar',
+iou_lm_output <- tibble(Imagery = 'WorldView',
                         Model = 'IoU ~ 1',
                         AIC = AIC(maxar_lm_smallest),
                         r2 = summary(maxar_lm_smallest)$r.squared) %>%
-  bind_rows(tibble(Imagery = 'Maxar',
+  bind_rows(tibble(Imagery = 'WorldView',
                    Model = 'IoU ~ Area',
                    AIC = AIC(maxar_lm_area),
                    r2 = summary(maxar_lm_area)$r.squared)) %>%
-  bind_rows(tibble(Imagery = 'Maxar',
+  bind_rows(tibble(Imagery = 'WorldView',
                    Model = 'IoU ~ Area + Shape',
                    AIC = AIC(maxar_lm_area_shape),
                    r2 = summary(maxar_lm_area_shape)$r.squared)) %>%
-  bind_rows(tibble(Imagery = 'Maxar',
+  bind_rows(tibble(Imagery = 'WorldView',
                    Model = 'IoU ~ Area*Shape',
                    AIC = AIC(maxar_lm_interaction),
                    r2 = summary(maxar_lm_interaction)$r.squared)) %>%
-  bind_rows(tibble(Imagery = 'Planet',
+  bind_rows(tibble(Imagery = 'PlanetScope',
                    Model = 'IoU ~ 1',
                    AIC = AIC(planet_lm_smallest),
                    r2 = summary(planet_lm_smallest)$r.squared)) %>%
-  bind_rows(tibble(Imagery = 'Planet',
+  bind_rows(tibble(Imagery = 'PlanetScope',
                    Model = 'IoU ~ Area',
                    AIC = AIC(planet_lm_area),
                    r2 = summary(planet_lm_area)$r.squared)) %>%
-  bind_rows(tibble(Imagery = 'Planet',
+  bind_rows(tibble(Imagery = 'PlanetScope',
                    Model = 'IoU ~ Area + Shape',
                    AIC = AIC(planet_lm_area_shape),
                    r2 = summary(planet_lm_area_shape)$r.squared)) %>%
-  bind_rows(tibble(Imagery = 'Planet',
+  bind_rows(tibble(Imagery = 'PlanetScope',
                    Model = 'IoU ~ Area*Shape',
                    AIC = AIC(planet_lm_interaction),
                    r2 = summary(planet_lm_interaction)$r.squared)) %>%
@@ -3370,9 +3384,95 @@ knitr::kable(iou_lm_output)
 ```
 
 
-## YG Region
+## Regions
+
+```{r}
+ggplot() +
+  geom_sf(data = world_north, fill = 'transparent') +
+  geom_sf(data = polys,
+          aes(geometry = rts_geometry, color = rts_area),
+          linewidth = 1,
+          inherit.aes = FALSE) +
+  scale_color_viridis(trans = 'log')
+
+ggplot(polys, aes(x = Long, y = rts_area)) +
+  geom_point(aes(color = name_long))
+```
+
+### Banks Island
+
+```{r}
+polys <- polys %>%
+  mutate(banks_island = case_when(Long < -100 & Long > -125 ~ 'Banks Island',
+                                  TRUE ~ 'Other'))
+```
+
+```{r}
+knitr::kable(polys%>%
+               as_tibble() %>%
+               summarise(rts_area_median = median(rts_area),
+                         rts_iou = round(mean(rts_iou), 2),
+                         .by = c('imagery', 'banks_island')))
+knitr::kable(polys%>%
+               as_tibble() %>%
+               summarise(rts_area_median = median(rts_area),
+                         rts_iou = round(mean(rts_iou), 2),
+                         .by = c('imagery', 'yg')))
+```
+
+```{r}
+newdata <- tibble(rts_area = c(1214.551, 9093.981),
+                  region = c('yg', 'banks'))
+
+regions_pred <- nlsBootPredict(
+  maxar_iou_boot, 
+  newdata = newdata, 
+  interval = 'prediction'
+) %>%
+  as_tibble() %>%
+  mutate(imagery = 'WorldView') %>%
+  bind_cols(newdata) %>%
+  bind_rows(
+    nlsBootPredict(
+      planet_iou_boot, 
+      newdata = tibble(rts_area = c(1214.551, 9093.981)), 
+      interval = 'prediction'
+    ) %>%
+      as_tibble() %>%
+  mutate(imagery = 'PlanetScope') %>%
+  bind_cols(newdata)
+  ) %>%
+  bind_rows(
+    nlsBootPredict(
+      sentinel_iou_boot, 
+      newdata = tibble(rts_area = c(1214.551, 9093.981)), 
+      interval = 'prediction'
+    ) %>%
+      as_tibble() %>%
+  mutate(imagery = 'Sentinel-2') %>%
+  bind_cols(newdata)
+  ) %>%
+  select(imagery, region, rts_area, Median, `2.5%`, `97.5%`)
+
+knitr::kable(regions_pred)
+```
+
+### YG Region
 
 The YG Region has smaller RTS features, which is probably responsible for the poorer IoU scores in the region.
+
+```{r}
+knitr::kable(polys%>%
+               as_tibble() %>%
+               summarise(rts_iou = round(mean(rts_iou), 2),
+                         .by = c('imagery', 'yg')))
+```
+
+```{r}
+iou_ci %>%
+  filter(abs(rts_area - 1215) == min(abs(rts_area - 1215)),
+         .by = imagery)
+```
 
 The Yamal-Gydan Peninsula appears to be both drier and have smaller RTS features, so these two variables are hard to disentangle.
 
@@ -3414,11 +3514,11 @@ rts_pq_hist
 
 ## Case Studies
 
-There are two really large RTS that were poorly predicted in at least one of the Planet and Sentinel models:
+There are two really large RTS that were poorly predicted in at least one of the PlanetScope and Sentinel models:
 
 -   May be that the RTS being so big is causing issues with the model (missing edges in the imagery)
 -   I'm not sure if this is impacting the prediction, but the tile for Sentinel is pretty different and includes a bunch of open water that's not in either of the other images.
--   Both the Planet and Sentinel images are really blurry relative to the Maxar in this area, making it visually impossible to delineate the RTS outside of the Maxar data.
+-   Both the PlanetScope and Sentinel images are really blurry relative to the WorldView in this area, making it visually impossible to delineate the RTS outside of the WorldView data.
 -   The RTS features seem to be brighter relative to the background in the poorly predicted ones, which is backwards from the conclusions of the zonal stats analysis.
 
 ```{r}
@@ -3494,8 +3594,8 @@ ggplot(zonal_stats %>%
 
 In the RTS features which had different prediction qualities across all three models, the main patterns are:
 
--   Planet completely missed the feature, Maxar did well, Sentinel did ok (2)
--   The rest all had a prediction in each model, and each permutation was represented for which model had which prediction quality (3)
+-   PlanetScope completely missed the feature, WorldView did well, Sentinel did ok (2)
+-   The rest all had a prediction in each model, and each one was different in terms of which models had which prediction quality (3)
 
 
 ```{r}
@@ -3660,18 +3760,18 @@ walk(rts_maps,
      ~ print(.x))
 ```
 
-Maxar High Quality Predictions
+WorldView High Quality Predictions
 
 ```{r}
 # get polygon data
 current_data <- polys %>%
-  filter(pq_ci == 'High' & imagery == 'Maxar') %>%
+  filter(pq_ci == 'High' & imagery == 'WorldView') %>%
   select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
          pred_geometry)
 
 # prep RGB data
 current_rgb <- input_data %>%
-  filter(pq_ci == 'High' & imagery == 'Maxar') %>%
+  filter(pq_ci == 'High' & imagery == 'WorldView') %>%
   full_join(current_data %>%
               select(id, imagery, rts_iou),
             by = c('imagery', 'id'))
@@ -3707,7 +3807,7 @@ plots <- map(
 plots
 ```
 
-Maxar Low Quality Predictions
+WorldView Low Quality Predictions
 
 -   It missed several that looked really green and others that varied in their visibility in the imagery.
 -   It got confused by a snow patch in one.
@@ -3718,13 +3818,13 @@ Maxar Low Quality Predictions
 ```{r}
 # get polygon data
 current_data <- polys %>%
-  filter(pq_ci == 'Low' & imagery == 'Maxar') %>%
+  filter(pq_ci == 'Low' & imagery == 'WorldView') %>%
   select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
          pred_geometry)
 
 # prep RGB data
 current_rgb <- input_data %>%
-  filter(pq_ci == 'Low' & imagery == 'Maxar') %>%
+  filter(pq_ci == 'Low' & imagery == 'WorldView') %>%
   full_join(current_data %>%
               select(id, imagery, rts_iou),
             by = c('imagery', 'id'))
@@ -3760,20 +3860,20 @@ plots <- map(
 plots
 ```
 
-Planet High Quality Predictions
+PlanetScope High Quality Predictions
 
 -   Most of these display a bright RTS on a dark background.
 
 ```{r}
 # get polygon data
 current_data <- polys %>%
-  filter(pq_ci == 'High' & imagery == 'Planet') %>%
+  filter(pq_ci == 'High' & imagery == 'PlanetScope') %>%
   select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
          pred_geometry)
 
 # prep RGB data
 current_rgb <- input_data %>%
-  filter(pq_ci == 'High' & imagery == 'Planet') %>%
+  filter(pq_ci == 'High' & imagery == 'PlanetScope') %>%
   full_join(current_data %>%
               select(id, imagery, rts_iou),
             by = c('imagery', 'id'))
@@ -3809,20 +3909,20 @@ plots <- map(
 plots
 ```
 
-Planet Low Quality Predictions
+PlanetScope Low Quality Predictions
 
-These images seem like they may be blurrier than the well predicted Planet RTS features and/or have less contrast.
+These images seem like they may be blurrier than the well predicted PlanetScope RTS features and/or have less contrast.
 
 ```{r}
 # get polygon data
 current_data <- polys %>%
-  filter(pq_ci == 'Low' & imagery == 'Planet') %>%
+  filter(pq_ci == 'Low' & imagery == 'PlanetScope') %>%
   select(imagery, id, rts_iou, pq_ci, bbox_geometry, val_geometry, 
          pred_geometry)
 
 # prep RGB data
 current_rgb <- input_data %>%
-  filter(pq_ci == 'Low' & imagery == 'Planet') %>%
+  filter(pq_ci == 'Low' & imagery == 'PlanetScope') %>%
   full_join(current_data %>%
               select(id, imagery, rts_iou),
             by = c('imagery', 'id'))
