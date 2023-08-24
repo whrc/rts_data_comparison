@@ -8,7 +8,8 @@ output:
 
 ## TODO:
 
--   Finalize RTS sample figure. Show outlines of predictions for all features within one tile? Fix RTS label justification when ggplot2 is next updated. Make the figure narrower? 
+- try making crop polygon over north pole by buffering a point and using `st_wrap_dateline()` to get rid of extra lines introduced into country outlines
+-   Finalize RTS sample figure. Show outlines of predictions for all features within one tile? Fix RTS label justification when ggplot2 is next updated. Make the figure narrower? Add labels for region?
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -1458,6 +1459,157 @@ rm(masks)
 ```
 
 
+## Add Region Info to `polys`
+
+Get Country Data for Mapping
+
+```{r}
+crop_poly <- tibble(lon = c(-180,180,180,-180,-180),
+                    lat = c(90,90,55,55,90)) %>%
+  st_as_sf(coords = c("lon","lat"),
+           crs = "EPSG:4326") %>%
+  summarise(geometry = st_combine(geometry)) %>%
+  st_cast("POLYGON") %>%
+  smoothr::densify(max_distance = 1) %>%
+  st_union(by_feature = TRUE)
+
+crop_line <- tibble(lon = c(-180, 180),
+                    lat = c(55, 55)) %>%
+  st_as_sf(coords = c("lon","lat"),
+           crs = "EPSG:4326") %>%
+  summarise(geometry = st_combine(geometry)) %>%
+  st_cast("LINESTRING") %>% 
+  smoothr::densify(max_distance = 1)
+
+arctic_circle <- tibble(lon = c(-180,180),
+                    lat = c(66, 66)) %>%
+  st_as_sf(coords = c("lon","lat"),
+           crs = "EPSG:4326") %>%
+  summarise(geometry = st_combine(geometry)) %>%
+  st_cast("LINESTRING") %>% 
+  smoothr::densify(max_distance = 1)
+
+world_north <- world %>%
+  st_intersection(crop_poly) %>%
+  st_transform(crs = st_crs(rts_outlines)) %>%
+  select(name_long, continent, region_un, subregion) %>%
+  st_union(by_feature = TRUE)
+  # mutate(geometry = st_as_sfc(map(geom, 
+  #                                 ~ st_combine(.x)),
+  #                             crs = st_crs(world)))
+
+world_north_buffer <- world_north %>%
+  st_buffer(50000)
+
+if (!('name_long' %in% colnames(polys))) {
+  
+  polys <- polys %>%
+  st_join(world_north_buffer)
+  
+}
+
+
+long_lines_from_coords <- function(lon, lat_min, lat_max) {
+  line <- expand_grid(lon = lon,
+                      lat = c(lat_min, lat_max)) %>%
+    st_as_sf(coords = c("lon","lat"),
+             crs = "EPSG:4326") %>%
+    summarise(geometry = st_combine(geometry)) %>%
+    st_cast("LINESTRING") %>% 
+    smoothr::densify(max_distance = 1) %>%
+    mutate(label = lon)
+  
+  return(line)
+}
+
+long_lines <- seq(-180, 180, by = 60) %>%
+  map(~ long_lines_from_coords(.x, lat_min = 55, lat_max = 90)) %>%
+  bind_rows()
+
+lat_lines_from_coords <- function(lat, lon_min, lon_max) {
+  line <- expand_grid(lon = c(lon_min, lon_max),
+                      lat = lat) %>%
+    st_as_sf(coords = c("lon","lat"),
+             crs = "EPSG:4326") %>%
+    summarise(geometry = st_combine(geometry)) %>%
+    st_cast("LINESTRING") %>% 
+    smoothr::densify(max_distance = 1) %>%
+    mutate(label = lat)
+  
+  return(line)
+}
+
+lat_lines <- seq(60, 90, by = 10) %>%
+  map(~ lat_lines_from_coords(.x, lon_min = -180, lon_max = 180)) %>%
+  bind_rows()
+```
+
+Hard Code Regions by Longitude
+
+```{r}
+polys <- polys %>%
+  mutate(region = factor(case_when(Long < -135 & Long > -140 ~ 'Herschel Island',
+                            Long < -130 & Long > -135 ~ 'Tuktoyaktuk',
+                            Long < -125 & Long > -130 ~ 'Horton Delta',
+                            Long < -110 & Long > -125 ~ 'Banks Island',
+                            Long > 60 & Long < 80 ~ 'Yamal/Gydan',
+                            TRUE ~ 'Other'),
+                         levels = c('Herschel Island',
+                                    'Tuktoyaktuk',
+                                    'Horton Delta',
+                                    'Banks Island',
+                                    'Yamal/Gydan')),
+         yg = case_when(Long > 60 & Long < 80 ~ 'Yamal/Gydan',
+                        TRUE ~ 'Other'),
+         banks = case_when(Long < -100 & Long > -125 ~ 'Banks Island',
+                                  TRUE ~ 'Other'))
+```
+
+```{r, fig.height = 2.5, fig.width = 4}
+site_map <- ggplot(world_north) +
+  geom_sf(data = long_lines,
+          color = 'gray90',
+          linewidth = 0.25) +
+  geom_sf(data = lat_lines,
+          color = 'gray90',
+          linewidth = 0.25) +
+  geom_sf(data = arctic_box,
+          color = 'transparent',
+          fill = 'gray90',
+          alpha = 0.5) +
+  geom_sf(color = 'black', fill = 'gray80') +
+  geom_sf(data = polys,
+          aes(geometry = rts_geometry, color = region, fill = region),
+          linewidth = 1,
+          inherit.aes = FALSE) +
+  geom_sf(data = crop_line, 
+          color = 'gray70',
+          inherit.aes = FALSE) +
+  geom_sf(data = arctic_circle, 
+          color = 'gray50',
+          linetype = 'dashed',
+          linewidth = 0.25,
+          inherit.aes = FALSE) +
+  scale_color_viridis(name = 'Region',
+                      discrete = TRUE) +
+  scale_fill_viridis(name = 'Region',
+                      discrete = TRUE) +
+  # geom_text()
+  theme_void()
+
+site_map
+
+# ggsave('./figures/site_map.pdf',
+#        site_map,
+#        height = 2.5,
+#        width = 4)
+# ggsave('./figures/site_map.jpg',
+#        site_map,
+#        height = 2.5,
+#        width = 4)
+```
+
+
 ## Convert Input Data to DF
 
 ```{r}
@@ -1621,47 +1773,6 @@ knitr::kable(imagery_performance_summary)
 ## Performance by Feature Size
 
 ### Size Distribution by Region
-
-```{r}
-sf_use_s2(FALSE)
-arctic_box <- tibble(lon = c(-180,180,180,-180,-180),
-                    lat = c(90,90,50,50,90)) %>%
-  st_as_sf(coords = c("lon","lat"),
-           crs = "EPSG:4326") %>%
-  summarise(geometry = st_combine(geometry)) %>%
-  st_cast("POLYGON") %>% 
-  smoothr::densify(max_distance = 1)
-
-world_north <- world %>%
-  st_crop(arctic_box) %>%
-  st_transform(crs = st_crs(rts_outlines)) %>%
-  select(name_long, continent, region_un, subregion)
-
-world_north_buffer <- world_north %>%
-  st_buffer(50000)
-
-if (!('name_long' %in% colnames(polys))) {
-  
-  polys <- polys %>%
-  st_join(world_north_buffer)
-  
-}
-
-polys <- polys %>%
-  mutate(yg = case_when(Long > 60 & Long < 80 ~ 'Yamal/Gydan',
-                        TRUE ~ 'Other'))
-# 
-# rts_outlines <- rts_outlines %>%
-#   mutate(yg = case_when(Long > 60 & Long < 80 ~ 'Yamal/Gydan',
-#                         TRUE ~ 'Other'))
-# 
-# ggplot() +
-#   geom_sf(data = world_north, fill = 'transparent') +
-#   geom_sf(data = polys,
-#           aes(geometry = rts_geometry, color = yg),
-#           linewidth = 1,
-#           inherit.aes = FALSE)
-```
 
 ```{r, include = FALSE}
 rts_area_hist <- ggplot(polys, aes(x = rts_area, fill = yg)) +
@@ -1950,6 +2061,13 @@ knitr::kable(
     summarise(missed_feature_count = n(),
               max_area = max(rts_area),
               .by = 'imagery')
+)
+
+knitr::kable(
+  polys %>%
+    as_tibble() %>%
+    summarise(missed_feature_count = n(),
+              .by = c('imagery', 'yg'))
 )
 
 knitr::kable(
@@ -3396,23 +3514,19 @@ ggplot() +
   scale_color_viridis(trans = 'log')
 
 ggplot(polys, aes(x = Long, y = rts_area)) +
-  geom_point(aes(color = name_long))
+  geom_point(aes(color = region)) +
+  scale_color_viridis(name = 'Region',
+                      discrete = TRUE)
 ```
 
 ### Banks Island
-
-```{r}
-polys <- polys %>%
-  mutate(banks_island = case_when(Long < -100 & Long > -125 ~ 'Banks Island',
-                                  TRUE ~ 'Other'))
-```
 
 ```{r}
 knitr::kable(polys%>%
                as_tibble() %>%
                summarise(rts_area_median = median(rts_area),
                          rts_iou = round(mean(rts_iou), 2),
-                         .by = c('imagery', 'banks_island')))
+                         .by = c('imagery', 'banks')))
 knitr::kable(polys%>%
                as_tibble() %>%
                summarise(rts_area_median = median(rts_area),
