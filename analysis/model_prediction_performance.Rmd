@@ -20,7 +20,6 @@ knitr::opts_chunk$set(message = FALSE)
 ## Load Libraries
 
 ```{r, include = FALSE}
-library(reticulate)
 library(terra)
 library(sf)
 library(lwgeom)
@@ -1464,22 +1463,13 @@ rm(masks)
 Get Country Data for Mapping
 
 ```{r}
-crop_poly <- tibble(lon = c(-180,180,180,-180,-180),
-                    lat = c(90,90,55,55,90)) %>%
-  st_as_sf(coords = c("lon","lat"),
-           crs = "EPSG:4326") %>%
-  summarise(geometry = st_combine(geometry)) %>%
-  st_cast("POLYGON") %>%
-  smoothr::densify(max_distance = 1) %>%
-  st_union(by_feature = TRUE)
-
-crop_line <- tibble(lon = c(-180, 180),
-                    lat = c(55, 55)) %>%
-  st_as_sf(coords = c("lon","lat"),
-           crs = "EPSG:4326") %>%
-  summarise(geometry = st_combine(geometry)) %>%
-  st_cast("LINESTRING") %>% 
-  smoothr::densify(max_distance = 1)
+crop_poly <- tibble(geometry = st_sfc(st_point(c(0, 90)),
+                                      crs = 'EPSG:4326')) %>%
+  st_sf() %>%
+  st_transform(crs = st_crs(polys)) %>%
+  st_buffer(dist = 3909167) %>%
+  smoothr::densify(n = 3) %>%
+  st_transform(crs = 'EPSG:4326')
 
 arctic_circle <- tibble(lon = c(-180,180),
                     lat = c(66, 66)) %>%
@@ -1491,13 +1481,12 @@ arctic_circle <- tibble(lon = c(-180,180),
 
 world_north <- world %>%
   st_intersection(crop_poly) %>%
-  st_transform(crs = st_crs(rts_outlines)) %>%
-  select(name_long, continent, region_un, subregion) %>%
-  st_union(by_feature = TRUE)
-  # mutate(geometry = st_as_sfc(map(geom, 
-  #                                 ~ st_combine(.x)),
-  #                             crs = st_crs(world)))
+  st_transform(crs = st_crs(polys)) %>%
+  select(name_long, continent, region_un, subregion)
 
+world_north <- world_north %>%
+  st_union(by_feature = TRUE)
+  
 world_north_buffer <- world_north %>%
   st_buffer(50000)
 
@@ -1565,7 +1554,7 @@ polys <- polys %>%
                                   TRUE ~ 'Other'))
 ```
 
-```{r, fig.height = 2.5, fig.width = 4}
+```{r, fig.height = 3.6, fig.width = 5}
 site_map <- ggplot(world_north) +
   geom_sf(data = long_lines,
           color = 'gray90',
@@ -1573,17 +1562,20 @@ site_map <- ggplot(world_north) +
   geom_sf(data = lat_lines,
           color = 'gray90',
           linewidth = 0.25) +
-  geom_sf(data = arctic_box,
+  geom_sf(data = crop_poly,
           color = 'transparent',
           fill = 'gray90',
           alpha = 0.5) +
-  geom_sf(color = 'black', fill = 'gray80') +
+  geom_sf(color = 'black', 
+          fill = 'gray80') +
   geom_sf(data = polys,
           aes(geometry = rts_geometry, color = region, fill = region),
           linewidth = 1,
           inherit.aes = FALSE) +
-  geom_sf(data = crop_line, 
+  geom_sf(data = crop_poly, 
           color = 'gray70',
+          fill = 'transparent',
+          linewidth = 0.5,
           inherit.aes = FALSE) +
   geom_sf(data = arctic_circle, 
           color = 'gray50',
@@ -1601,12 +1593,12 @@ site_map
 
 # ggsave('./figures/site_map.pdf',
 #        site_map,
-#        height = 2.5,
-#        width = 4)
+#        height = 3.6,
+#        width = 5)
 # ggsave('./figures/site_map.jpg',
 #        site_map,
-#        height = 2.5,
-#        width = 4)
+#        height = 3.6,
+#        width = 5)
 ```
 
 
