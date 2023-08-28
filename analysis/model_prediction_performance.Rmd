@@ -1484,6 +1484,8 @@ world_north <- world %>%
   st_transform(crs = st_crs(polys)) %>%
   select(name_long, continent, region_un, subregion)
 
+world_north$geom[4] <- st_buffer(world_north$geom[4], 0.25)
+
 world_north <- world_north %>%
   st_union(by_feature = TRUE)
   
