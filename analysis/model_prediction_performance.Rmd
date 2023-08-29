@@ -1766,94 +1766,6 @@ knitr::kable(imagery_performance_summary)
 
 ## Performance by Feature Size
 
-### Size Distribution by Region
-
-```{r, include = FALSE}
-rts_area_hist <- ggplot(polys, aes(x = rts_area, fill = yg)) +
-  geom_density(alpha = 0.9) +
-  scale_fill_manual(name = 'Region',
-                    values = c('white', 'black')) +
-  scale_x_log10(name = expression('RTS Area (m'^2*')'),
-                labels = scales::label_number(big.mark = ''),
-                minor_breaks = c(seq(100, 900, by = 100),
-                           seq(1000, 9000, by = 1000),
-                           seq(10000, 90000, by = 10000),
-                           seq(100000, 200000, by = 100000))) +
-  scale_y_continuous(name = 'Density')
-rts_area_hist
-
-# ggsave('./figures/rts_area_hist.pdf',
-#        rts_area_hist,
-#        width = 6.5,
-#        height = 3)
-# ggsave('./figures/rts_area_hist.jpg',
-#        rts_area_hist,
-#        width = 6.5,
-#        height = 3)
-```
-
-```{r, include = FALSE}
-arrows <- tibble(
-  xmin = c(
-    min(polys$rts_shape) + 0.0625*(max(polys$rts_shape) - min(polys$rts_shape)),
-    max(polys$rts_shape) - 0.0625*(max(polys$rts_shape) - min(polys$rts_shape))
-    ),
-  xmax = c(
-    min(polys$rts_shape),
-    max(polys$rts_shape)
-    ),
-  y = rep(-0.85, 2),
-  label = c('Less Compact', 'More Compact')
-  )
-
-rts_shape_hist <- ggplot(polys, aes(x = rts_shape, fill = yg)) +
-  geom_density(alpha = 0.9) +
-  annotate(
-    'segment',
-    x = arrows$xmin, xend = arrows$xmax,
-    y = arrows$y, yend = arrows$y,
-    arrow = arrow(length = unit(0.3, 'cm'))
-  ) +
-  annotate(
-    'text',
-    x = arrows$xmin + c(0.01, -0.01),
-    y = arrows$y,
-    label = arrows$label,
-    size = 3,
-    hjust = c(0, 1)
-  ) +
-  scale_fill_manual(name = 'Region',
-                    values = c('white', 'black')) +
-  scale_x_continuous(name = expression('RTS Shape')) +
-  scale_y_continuous(name = 'Density') +
-  coord_cartesian(clip = 'off',
-                  ylim = c(0, 2.55))
-rts_shape_hist
-
-# ggsave('./figures/rts_shape_hist.pdf',
-#        rts_shape_hist,
-#        width = 6.5,
-#        height = 3)
-# ggsave('./figures/rts_shape_hist.jpg',
-#        rts_shape_hist,
-#        width = 6.5,
-#        height = 3)
-```
-
-```{r, fig.height = 4, fig.width = 6.5}
-rts_area_shape_hist <- rts_area_hist  /
-  rts_shape_hist +
-    plot_layout(guides = 'collect') & theme(legend.position = 'bottom')
-rts_area_shape_hist
-# ggsave('./figures/rts_area_shape_hist.pdf',
-#        rts_area_shape_hist,
-#        width = 6.5,
-#        height = 4)
-# ggsave('./figures/rts_area_shape_hist.jpg',
-#        rts_area_shape_hist,
-#        width = 6.5,
-#        height = 4)
-```
 
 ```{r}
 rts_summaries <- polys %>%
@@ -2060,7 +1972,7 @@ knitr::kable(
 knitr::kable(
   polys %>%
     as_tibble() %>%
-    summarise(missed_feature_count = n(),
+    summarise(feature_count = n(),
               .by = c('imagery', 'yg'))
 )
 
@@ -2070,6 +1982,21 @@ knitr::kable(
     filter(rts_iou == 0) %>%
     summarise(missed_feature_count = n(),
               .by = c('imagery', 'yg'))
+)
+
+knitr::kable(
+  polys %>%
+    as_tibble() %>%
+    summarise(feature_count = n(),
+              .by = c('imagery', 'region'))
+)
+
+knitr::kable(
+  polys %>%
+    as_tibble() %>%
+    filter(rts_iou == 0) %>%
+    summarise(missed_feature_count = n(),
+              .by = c('imagery', 'region'))
 )
 ```
 
@@ -2455,8 +2382,8 @@ ggplot(polys,
 input_data <- input_data %>%
   left_join(polys %>%
               as_tibble() %>%
-              select(id, imagery, yg, rts_area, rts_shape, rts_iou, mean_iou, 
-                     mean_iou_v2, pq_ci, pq_ci_size),
+              select(id, imagery, region, rts_area, rts_shape, rts_iou, 
+                     mean_iou, mean_iou_v2, pq_ci, pq_ci_size),
             by = c('imagery', 'id')) %>%
   left_join(masks_df, by = c('imagery', 'id', 'x', 'y'))
 ```
@@ -2466,8 +2393,8 @@ zonal_stats <- input_data %>%
   filter(mask == 1) %>%
   summarise(across(c(prediction, r:sr), mean, .names = "{.col}_mean"),
             across(r:sr, sd, .names = "{.col}_sd"),
-            .by = c(imagery, id, yg, rts_class, rts_area, rts_shape, rts_iou, 
-                    mean_iou, mean_iou_v2, pq_ci, pq_ci_size)) %>%
+            .by = c(imagery, id, region, rts_class, rts_area, rts_shape, 
+                    rts_iou, mean_iou, mean_iou_v2, pq_ci, pq_ci_size)) %>%
   pivot_wider(names_from = 'rts_class', 
               values_from = c(prediction_mean:sr_sd)) %>%
   mutate(r_mean_delta = (r_mean_rts - r_mean_bg),
@@ -3346,9 +3273,9 @@ No, we can't predict the prediction quality very well based on the input data, f
 
 ## RTS Morphology
 
-```{r}
+```{r, fig.width = 6.5, fig.height = 6}
 ggplot(polys, 
-       aes(x = rts_shape, y = rts_area, color = pq_ci, shape = yg)) +
+       aes(x = rts_shape, y = rts_area, color = pq_ci)) +
   geom_point() +
   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
   scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
@@ -3360,7 +3287,7 @@ ggplot(polys,
                      values = pq_colors) +
   scale_shape_manual(name = 'Region',
                      values = c(1, 16)) +
-  facet_grid(. ~ imagery) +
+  facet_grid(region ~ imagery) +
   theme(axis.text.y = element_text(angle = 90))
 ```
 
@@ -3496,117 +3423,199 @@ knitr::kable(iou_lm_output)
 ```
 
 
-## Regions
+## Regional Analysis
 
-```{r}
-ggplot() +
-  geom_sf(data = world_north, fill = 'transparent') +
-  geom_sf(data = polys,
-          aes(geometry = rts_geometry, color = rts_area),
-          linewidth = 1,
-          inherit.aes = FALSE) +
-  scale_color_viridis(trans = 'log')
+### Size Distribution
 
-ggplot(polys, aes(x = Long, y = rts_area)) +
-  geom_point(aes(color = region)) +
-  scale_color_viridis(name = 'Region',
-                      discrete = TRUE)
+```{r, include = FALSE}
+rts_area_hist <- ggplot(polys, aes(x = rts_area, fill = region)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_viridis(name = 'Region',
+                    discrete = TRUE) +
+  scale_x_log10(name = expression('RTS Area (m'^2*')'),
+                labels = scales::label_number(big.mark = ''),
+                minor_breaks = c(seq(100, 900, by = 100),
+                           seq(1000, 9000, by = 1000),
+                           seq(10000, 90000, by = 10000),
+                           seq(100000, 200000, by = 100000)),
+                expand = c(0, 0)) +
+  scale_y_continuous(name = 'Density',
+                     expand = expansion(mult = c(0, 0.05)))
+rts_area_hist
+
+# ggsave('./figures/rts_area_hist.pdf',
+#        rts_area_hist,
+#        width = 6.5,
+#        height = 3)
+# ggsave('./figures/rts_area_hist.jpg',
+#        rts_area_hist,
+#        width = 6.5,
+#        height = 3)
 ```
 
-### Banks Island
+```{r, include = FALSE}
+arrows <- tibble(
+  xmin = c(
+    min(polys$rts_shape) + 0.0625*(max(polys$rts_shape) - min(polys$rts_shape)),
+    max(polys$rts_shape) - 0.0625*(max(polys$rts_shape) - min(polys$rts_shape))
+    ),
+  xmax = c(
+    min(polys$rts_shape),
+    max(polys$rts_shape)
+    ),
+  y = rep(-1, 2),
+  label = c('Less Compact', 'More Compact')
+  )
+
+rts_shape_hist <- ggplot(polys, aes(x = rts_shape, fill = region)) +
+  geom_density(alpha = 0.5) +
+  annotate(
+    'segment',
+    x = arrows$xmin, xend = arrows$xmax,
+    y = arrows$y, yend = arrows$y,
+    arrow = arrow(length = unit(0.3, 'cm'))
+  ) +
+  annotate(
+    'text',
+    x = arrows$xmin + c(0.01, -0.01),
+    y = arrows$y,
+    label = arrows$label,
+    size = 3,
+    hjust = c(0, 1)
+  ) +
+  scale_fill_viridis(name = 'Region',
+                    discrete = TRUE) +
+  scale_x_continuous(name = expression('RTS Shape'),
+                     breaks = seq(0.3, 0.8, by = 0.1),
+                     minor_breaks = seq(0.22, 0.86, by = 0.02),
+                     expand = c(0, 0)) +
+  scale_y_continuous(name = 'Density',
+                     expand = expansion(mult = c(0, 0.05))) +
+  coord_cartesian(clip = 'off',
+                  ylim = c(0, 4.3))
+rts_shape_hist
+
+# ggsave('./figures/rts_shape_hist.pdf',
+#        rts_shape_hist,
+#        width = 6.5,
+#        height = 3)
+# ggsave('./figures/rts_shape_hist.jpg',
+#        rts_shape_hist,
+#        width = 6.5,
+#        height = 3)
+```
+
+```{r, fig.height = 4, fig.width = 6.5}
+rts_area_shape_hist <- rts_area_hist  /
+  rts_shape_hist +
+    plot_layout(guides = 'collect')
+rts_area_shape_hist
+# ggsave('./figures/rts_area_shape_hist.pdf',
+#        rts_area_shape_hist,
+#        width = 6.5,
+#        height = 4)
+# ggsave('./figures/rts_area_shape_hist.jpg',
+#        rts_area_shape_hist,
+#        width = 6.5,
+#        height = 4)
+```
+
+### Performance
 
 ```{r}
-knitr::kable(polys%>%
-               as_tibble() %>%
-               summarise(rts_area_median = median(rts_area),
-                         rts_iou = round(mean(rts_iou), 2),
-                         .by = c('imagery', 'banks')))
-knitr::kable(polys%>%
-               as_tibble() %>%
-               summarise(rts_area_median = median(rts_area),
-                         rts_iou = round(mean(rts_iou), 2),
-                         .by = c('imagery', 'yg')))
+ggplot(polys, aes(x = region, y = rts_area)) +
+  geom_point(aes(color = pq_ci)) +
+  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
+                minor_breaks = c(seq(100, 900, by = 100),
+                           seq(1000, 9000, by = 1000),
+                           seq(10000, 90000, by = 10000),
+                           seq(100000, 200000, by = 100000))) +
+  scale_color_manual(name = 'Prediction\nQuality',
+                     values = pq_colors) +
+  facet_grid(. ~ imagery) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+ggplot(polys, aes(x = region, y = rts_area)) +
+  geom_point(aes(color = rts_iou)) +
+  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
+                minor_breaks = c(seq(100, 900, by = 100),
+                           seq(1000, 9000, by = 1000),
+                           seq(10000, 90000, by = 10000),
+                           seq(100000, 200000, by = 100000))) +
+  scale_color_viridis(name = 'RTS IoU') +
+  facet_grid(. ~ imagery) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 ```
 
 ```{r}
-newdata <- tibble(rts_area = c(1214.551, 9093.981),
-                  region = c('yg', 'banks'))
-
-regions_pred <- nlsBootPredict(
-  maxar_iou_boot, 
-  newdata = newdata, 
-  interval = 'prediction'
-) %>%
+region_stats <- polys %>%
   as_tibble() %>%
-  mutate(imagery = 'WorldView') %>%
-  bind_cols(newdata) %>%
-  bind_rows(
+  summarise(rts_area = median(rts_area),
+            rts_iou = round(mean(rts_iou), 2),
+            .by = c('imagery', 'region'))
+
+newdata <- region_stats %>%
+  select(region, rts_area) %>%
+  unique()
+
+regions_stats <- region_stats %>%
+  full_join(
     nlsBootPredict(
-      planet_iou_boot, 
-      newdata = tibble(rts_area = c(1214.551, 9093.981)), 
+      maxar_iou_boot, 
+      newdata = newdata, 
       interval = 'prediction'
     ) %>%
       as_tibble() %>%
-  mutate(imagery = 'PlanetScope') %>%
-  bind_cols(newdata)
-  ) %>%
-  bind_rows(
-    nlsBootPredict(
-      sentinel_iou_boot, 
-      newdata = tibble(rts_area = c(1214.551, 9093.981)), 
-      interval = 'prediction'
-    ) %>%
-      as_tibble() %>%
-  mutate(imagery = 'Sentinel-2') %>%
-  bind_cols(newdata)
-  ) %>%
-  select(imagery, region, rts_area, Median, `2.5%`, `97.5%`)
+      mutate(imagery = 'WorldView') %>%
+      bind_cols(newdata) %>%
+      bind_rows(
+        nlsBootPredict(
+          planet_iou_boot, 
+          newdata = newdata, 
+          interval = 'prediction'
+        ) %>%
+          as_tibble() %>%
+          mutate(imagery = 'PlanetScope') %>%
+          bind_cols(newdata)
+      ) %>%
+      bind_rows(
+        nlsBootPredict(
+          sentinel_iou_boot, 
+          newdata = newdata, 
+          interval = 'prediction'
+        ) %>%
+          as_tibble() %>%
+          mutate(imagery = 'Sentinel-2') %>%
+          bind_cols(newdata)
+      ) %>%
+      select(imagery, region, rts_area, Median, `2.5%`, `97.5%`),
+    by = c('imagery', 'region', 'rts_area')
+  )
 
-knitr::kable(regions_pred)
+knitr::kable(regions_stats)
 ```
-
-### YG Region
-
-The YG Region has smaller RTS features, which is probably responsible for the poorer IoU scores in the region.
-
-```{r}
-knitr::kable(polys%>%
-               as_tibble() %>%
-               summarise(rts_iou = round(mean(rts_iou), 2),
-                         .by = c('imagery', 'yg')))
-```
-
-```{r}
-iou_ci %>%
-  filter(abs(rts_area - 1215) == min(abs(rts_area - 1215)),
-         .by = imagery)
-```
-
-The Yamal-Gydan Peninsula appears to be both drier and have smaller RTS features, so these two variables are hard to disentangle.
-
-```{r}
-zonal_stats_class %>%
-  group_by(imagery, id, yg) %>%
-  summarise(ndwi_mean = mean(ndwi_mean),
-            rts_area = first(rts_area),
-            region = first(yg)) %>%
-ggplot(aes(x = ndwi_mean, y = rts_area, color = yg)) +
-  geom_point()
-```
-
-All models are tripped up by the Yamal/Gydan Region.
 
 ```{r, fig.height = 4, fig.width = 6.5}
 rts_pq_hist <- ggplot(polys,
-       aes(x = yg, fill = pq_ci)) +
-  geom_bar(position = 'fill') +
+       aes(x = region)) +
+  geom_bar(aes(fill = pq_ci),
+           position = 'fill') +
+  geom_text(data = polys %>%
+              as_tibble() %>%
+              count(imagery, region),
+            y = 0.97,
+            aes(label = n)) +
   scale_x_discrete(name = 'Region') +
   scale_y_continuous(labels = scales::percent,
-                     minor_breaks = seq(0, 1, by = 0.05)) +
+                     minor_breaks = seq(0, 1, by = 0.05),
+                     expand = c(0.01, 0.01)) +
   scale_fill_manual(name = 'Prediction\nQuality',
                     values = pq_colors) +
   facet_grid(. ~ imagery) +
-  theme(axis.title.y = element_blank())
+  theme(axis.title = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 rts_pq_hist
 
 # ggsave('./figures/rts_pq_hist.pdf',
@@ -3617,6 +3626,82 @@ rts_pq_hist
 #        rts_pq_hist,
 #        height = 4,
 #        width = 6.5)
+```
+
+```{r, fig.width = 6.5, fig.height = 5}
+ggplot(polys, 
+       aes(x = rts_area, y = rts_shape, color = pq_ci)) +
+  geom_point() +
+  scale_color_manual(name = 'Prediction\nQuality',
+                     values = pq_colors) +
+  facet_grid(region ~ imagery)
+```
+
+### Environmental Conditions
+
+The YG Region has smaller RTS features, which is partially responsible for the poorer IoU scores in the region.
+
+Banks Island and Yamal/Gydan had the highest proportion of poorly predicted RTS. They also tended to have lower NDVI, higher NDWI, and higher shaded relief values.
+
+```{r}
+regional_env <- zonal_stats_class %>%
+  select(-imagery) %>%
+  distinct()
+
+ggplot(regional_env,
+         aes(x = lum_mean, y = rts_area, color = region, shape = rts_class)) +
+  geom_point() +
+  scale_color_viridis(name = 'Region',
+                      discrete = TRUE) +
+    scale_shape_manual(name = 'RTS Class',
+                       values = c(16, 1)) +
+    facet_grid(rts_class ~ .)
+
+ggplot(regional_env,
+         aes(x = nir_mean, y = rts_area, color = region, shape = rts_class)) +
+  geom_point() +
+  scale_color_viridis(name = 'Region',
+                      discrete = TRUE) +
+    scale_shape_manual(name = 'RTS Class',
+                       values = c(16, 1)) +
+    facet_grid(rts_class ~ .)
+
+ggplot(regional_env,
+       aes(x = ndvi_mean, y = rts_area, color = region, shape = rts_class)) +
+  geom_point() +
+  scale_color_viridis(name = 'Region',
+                      discrete = TRUE) +
+    scale_shape_manual(name = 'RTS Class',
+                       values = c(16, 1)) +
+    facet_grid(rts_class ~ .)
+
+ggplot(regional_env,
+         aes(x = ndwi_mean, y = rts_area, color = region, shape = rts_class)) +
+  geom_point() +
+  scale_color_viridis(name = 'Region',
+                      discrete = TRUE) +
+    scale_shape_manual(name = 'RTS Class',
+                       values = c(16, 1)) +
+    facet_grid(rts_class ~ .)
+
+ggplot(regional_env,
+       aes(x = elev_mean, y = rts_area, color = region, shape = rts_class)) +
+  geom_point() +
+  scale_color_viridis(name = 'Region',
+                      discrete = TRUE) +
+    scale_shape_manual(name = 'RTS Class',
+                       values = c(16, 1)) +
+    facet_grid(rts_class ~ .)
+
+ggplot(regional_env,
+       aes(x = sr_mean, y = rts_area, color = region, shape = rts_class)) +
+  geom_point() +
+  scale_color_viridis(name = 'Region',
+                      discrete = TRUE) +
+    scale_shape_manual(name = 'RTS Class',
+                       values = c(16, 1)) +
+    facet_grid(rts_class ~ .)
+
 ```
 
 
@@ -3814,7 +3899,7 @@ rts_maps_subset <- map(
 )
 ```
 
-```{r, fig.width = 6.5, fig.height = 9}
+```{r, fig.width = 5, fig.height = 9}
 rts_highlights_plot <- (
   rts_maps_subset[[1]] +
     facet_grid('Good Prediction' ~ imagery)
