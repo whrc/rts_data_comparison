@@ -1344,7 +1344,13 @@ pred_polys <- maxar_pred_polys %>%
 polys <- polys %>%
   full_join(pred_polys %>%
               as_tibble(),
-            by = c('id', 'imagery'))
+            by = c('id', 'imagery')) %>%
+  mutate(
+    pred_area = as.numeric(st_area(pred_geometry)),
+    pred_shape = as.numeric(
+      4*pi*pred_area/st_perimeter(pred_geometry)^2
+      ) # calculate Polsby-Popper value (shape compactness/roundness)
+    )
 
 rm(maxar_pred_polys, planet_pred_polys, sentinel_pred_polys, pred_polys)
 ```
@@ -1376,7 +1382,13 @@ val_polys <- maxar_val_polys %>%
 polys <- polys %>%
   full_join(val_polys %>%
               as_tibble(),
-            by = c('id', 'imagery'))
+            by = c('id', 'imagery')) %>%
+  mutate(
+    val_area = as.numeric(st_area(val_geometry)),
+    val_shape = as.numeric(
+      4*pi*val_area/st_perimeter(val_geometry)^2
+      ) # calculate Polsby-Popper value (shape compactness/roundness)
+    )
 
 rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 ```
@@ -1973,22 +1985,26 @@ knitr::kable(
   polys %>%
     as_tibble() %>%
     summarise(feature_count = n(),
-              .by = c('imagery', 'yg'))
-)
-
-knitr::kable(
-  polys %>%
+              .by = c('imagery', 'yg')) %>%
+    full_join(polys %>%
     as_tibble() %>%
     filter(rts_iou == 0) %>%
     summarise(missed_feature_count = n(),
-              .by = c('imagery', 'yg'))
+              .by = c('imagery', 'yg')),
+    by = c('imagery', 'yg'))
 )
 
 knitr::kable(
   polys %>%
     as_tibble() %>%
     summarise(feature_count = n(),
-              .by = c('imagery', 'region'))
+              .by = c('imagery', 'region')) %>%
+    full_join(polys %>%
+                as_tibble() %>%
+                filter(rts_iou == 0) %>%
+                summarise(missed_feature_count = n(),
+                          .by = c('imagery', 'region')),
+              by = c('imagery', 'region'))
 )
 
 knitr::kable(
@@ -1996,7 +2012,7 @@ knitr::kable(
     as_tibble() %>%
     filter(rts_iou == 0) %>%
     summarise(missed_feature_count = n(),
-              .by = c('imagery', 'region'))
+              .by = c('imagery', 'region', 'status'))
 )
 ```
 
@@ -2179,8 +2195,7 @@ min_rts_area <- iou_ci %>%
   left_join(size_thresholds %>%
               mutate(rts_threshold = ceiling(rts_threshold/100)*100),
             by = 'imagery') %>%
-  mutate(rts_iou_median = round(rts_iou_median, 2),
-         rts_area_exceed_median = ceiling(rts_area/100)*100) %>%
+  mutate(rts_iou_median = round(rts_iou_median, 2)) %>%
   select(-rts_area) %>%
   left_join(iou_ci %>%
               filter(prediction > 0.5, .by = imagery) %>%
@@ -2190,7 +2205,6 @@ min_rts_area <- iou_ci %>%
   mutate(rts_area_exceed_0.5 = ceiling(rts_area/100)*100) %>%
   select(`Imagery` = imagery, 
          `Median RTS IoU` = rts_iou_median,
-         `RTS Area to Exceed Median RTS IoU` = rts_area_exceed_median,
          `RTS Area Threshold Where Slope <1e-05` = rts_threshold,
          `RTS Area to Exceed 0.5` = rts_area_exceed_0.5)
 
@@ -3272,6 +3286,24 @@ No, we can't predict the prediction quality very well based on the input data, f
 
 
 ## RTS Morphology
+
+```{r}
+ggplot(polys,
+       aes(x = rts_area, y = pred_area)) +
+  geom_point()
+
+ggplot(polys,
+       aes(x = val_area, y = pred_area)) +
+  geom_point()
+
+ggplot(polys,
+       aes(x = rts_shape, y = pred_shape)) +
+  geom_point()
+
+ggplot(polys,
+       aes(x = val_shape, y = pred_shape)) +
+  geom_point()
+```
 
 ```{r, fig.width = 6.5, fig.height = 6}
 ggplot(polys, 
