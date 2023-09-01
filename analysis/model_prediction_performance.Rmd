@@ -2195,7 +2195,6 @@ min_rts_area <- iou_ci %>%
   left_join(size_thresholds %>%
               mutate(rts_threshold = ceiling(rts_threshold/100)*100),
             by = 'imagery') %>%
-  mutate(rts_iou_median = round(rts_iou_median, 2)) %>%
   select(-rts_area) %>%
   left_join(iou_ci %>%
               filter(prediction > 0.5, .by = imagery) %>%
@@ -2203,10 +2202,9 @@ min_rts_area <- iou_ci %>%
                         .by = imagery),
             by = 'imagery') %>%
   mutate(rts_area_exceed_0.5 = ceiling(rts_area/100)*100) %>%
-  select(`Imagery` = imagery, 
-         `Median RTS IoU` = rts_iou_median,
-         `RTS Area Threshold Where Slope <1e-05` = rts_threshold,
-         `RTS Area to Exceed 0.5` = rts_area_exceed_0.5)
+  select(`Imagery` = imagery,
+         `Detection Threshold` = rts_area_exceed_0.5, 
+         `RTS Area Threshold Where Slope <1e-05` = rts_threshold)
 
 # write.csv(min_rts_area,
 #           './tables/rts_area_thresholds.csv',
