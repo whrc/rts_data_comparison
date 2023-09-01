@@ -114,17 +114,6 @@
       ],
       "Hash": "ae6cbbe1492f4de79c45fce06f967ce8"
     },
-    "RcppTOML": {
-      "Package": "RcppTOML",
-      "Version": "0.2.2",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "R",
-        "Rcpp"
-      ],
-      "Hash": "c232938949fcd8126034419cc529333a"
-    },
     "Ryacas": {
       "Package": "Ryacas",
       "Version": "1.1.5",
@@ -1021,16 +1010,6 @@
         "vctrs"
       ],
       "Hash": "8b331e659e67d757db0fcc28e689c501"
-    },
-    "here": {
-      "Package": "here",
-      "Version": "1.0.1",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "rprojroot"
-      ],
-      "Hash": "24b224366f9c2e7534d2344d10d59211"
     },
     "highr": {
       "Package": "highr",
@@ -1972,28 +1951,6 @@
       ],
       "Hash": "d66fe009d4c20b7ab1927eb405db9ee2"
     },
-    "reticulate": {
-      "Package": "reticulate",
-      "Version": "1.30",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "Matrix",
-        "R",
-        "Rcpp",
-        "RcppTOML",
-        "graphics",
-        "here",
-        "jsonlite",
-        "methods",
-        "png",
-        "rappdirs",
-        "rlang",
-        "utils",
-        "withr"
-      ],
-      "Hash": "103e4814f4a7a3eb9fb28adf52bf1586"
-    },
     "rlang": {
       "Package": "rlang",
       "Version": "1.1.1",
@@ -2041,16 +1998,6 @@
         "stats"
       ],
       "Hash": "b3c892a81783376cc2204af0f5805a80"
-    },
-    "rprojroot": {
-      "Package": "rprojroot",
-      "Version": "2.0.3",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "R"
-      ],
-      "Hash": "1de7ab598047a87bba48434ba35d497d"
     },
     "rsample": {
       "Package": "rsample",
