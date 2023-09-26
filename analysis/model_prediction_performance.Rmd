@@ -243,6 +243,18 @@ googledrive_download <- function(name, id, drive_resource, directory) {
 }
 ```
 
+### group_bbox
+
+```{r}
+group_bbox <- function(x) {
+  return (
+    x %>%
+      st_bbox() %>%
+      st_as_sfc()
+    )
+}
+```
+
 ### input_as_df
 
 ```{r, include = FALSE}
@@ -1404,7 +1416,7 @@ polys <- polys %>%
                             Long < -130 & Long > -135 ~ 'Tuktoyaktuk',
                             Long < -125 & Long > -130 ~ 'Horton Delta',
                             Long < -110 & Long > -125 ~ 'Banks Island',
-                            Long > 60 & Long < 80 ~ 'Yamal/Gydan',
+                            Long > 60 & Long < 90 ~ 'Yamal/Gydan',
                             TRUE ~ 'Other'),
                          levels = c('Herschel Island',
                                     'Tuktoyaktuk',
@@ -1417,7 +1429,52 @@ polys <- polys %>%
                                   TRUE ~ 'Other'))
 ```
 
-```{r, fig.height = 3.6, fig.width = 5}
+Create Region Bounding Boxes
+
+```{r}
+regions <- st_read('./data/rts_polygons/rts_polygons_for_Yili_May_2022_v2.shp') %>%
+  st_transform(crs = 3413) %>%
+  select(id = ID, Long, Lat) %>%
+  bind_rows(st_read('./data/rts_polygons/rts_polygons_for_Yili_Jan_2023.shp') %>%
+              st_transform(crs = 3413) %>%
+              select(id = ID, Long, Lat)) %>%
+  bind_rows(st_read('./data/rts_polygons/rts_polygons_for_Yili_Mar_2022_v2.shp') %>%
+              st_transform(crs = 3413) %>%
+              select(id = ID, Long, Lat)) %>%
+  mutate(region = factor(case_when(Long < -135 & Long > -140 ~ 'Herschel Island',
+                                   Long < -130 & Long > -135 ~ 'Tuktoyaktuk',
+                                   Long < -125 & Long > -130 ~ 'Horton Delta',
+                                   Long < -110 & Long > -125 ~ 'Banks Island',
+                                   Long > 40 & Long < 60 ~ 'Kolguev Island',
+                                   Long > 60 & Long < 90 ~ 'Yamal/Gydan',
+                                   Long > 90 ~ 'Lena River',
+                                   TRUE ~ 'Other'),
+                         levels = c('Herschel Island',
+                                    'Tuktoyaktuk',
+                                    'Horton Delta',
+                                    'Banks Island',
+                                    'Yamal/Gydan',
+                                    'Kolguev Island',
+                                    'Lena River'))) %>%
+  st_set_geometry('rts_geometry') %>%
+  select(id, region) %>%
+  st_transform(crs = 'EPSG:4326') %>%
+  group_by(region) %>%
+  nest() %>%
+  mutate(geometry = map(data, group_bbox)[[1]],
+         color = factor(case_when(region %in% c('Kolguev Island', 'Lena River') ~ NA,
+                                  TRUE ~ region),
+                        levels = c('Herschel Island',
+                                   'Tuktoyaktuk',
+                                   'Horton Delta',
+                                   'Banks Island',
+                                   'Yamal/Gydan'))) %>%
+  st_as_sf() %>%
+  st_transform(crs = st_crs(polys)) %>%
+  st_buffer(50000, joinStyle = "MITRE", mitreLimit = 10000)
+```
+
+```{r, fig.height = 3.5, fig.width = 3.5}
 site_map <- ggplot(world_north) +
   geom_sf(data = long_lines,
           color = 'gray90',
@@ -1431,24 +1488,36 @@ site_map <- ggplot(world_north) +
           alpha = 0.5) +
   geom_sf(color = 'black', 
           fill = 'gray80') +
-  geom_sf(data = polys,
-          aes(geometry = rts_geometry, color = region, fill = region),
-          linewidth = 1,
-          inherit.aes = FALSE) +
-  geom_sf(data = crop_poly, 
-          color = 'gray70',
-          fill = 'transparent',
-          linewidth = 0.5,
-          inherit.aes = FALSE) +
   geom_sf(data = arctic_circle, 
           color = 'gray50',
           linetype = 'dashed',
           linewidth = 0.25,
           inherit.aes = FALSE) +
+  geom_sf(data = regions,
+          aes(geometry = geometry, color = color), 
+          fill = 'transparent',
+          linewidth = 1,
+          inherit.aes = FALSE) +
+  geom_sf_label(data = regions,
+          aes(geometry = geometry, label = region),
+          hjust = 'outward',
+          nudge_x = c(300000, rep(-150000, 4), rep(150000, 2)),
+          nudge_y = c(0, -95000, 0, 0, 70000, 0, 0),
+          size = 2.1,
+          alpha = 0.7,
+          label.padding = unit(0.1, 'lines'),
+          label.size = NA,
+          label.r = unit(0.1, 'lines')
+          ) +
+  geom_sf(data = crop_poly, 
+          color = 'gray60',
+          fill = 'transparent',
+          linewidth = 0.5,
+          inherit.aes = FALSE) +
   scale_color_viridis(name = 'Region',
-                      discrete = TRUE) +
-  scale_fill_viridis(name = 'Region',
-                      discrete = TRUE) +
+                      discrete = TRUE,
+                      guide = 'none',
+                      na.value = 'gray50') +
   # geom_text()
   theme_void()
 
@@ -1456,12 +1525,12 @@ site_map
 
 # ggsave('./figures/site_map.pdf',
 #        site_map,
-#        height = 3.6,
-#        width = 5)
+#        height = 3.5,
+#        width = 3.5)
 # ggsave('./figures/site_map.jpg',
 #        site_map,
-#        height = 3.6,
-#        width = 5)
+#        height = 3.5,
+#        width = 3.5)
 ```
 
 
