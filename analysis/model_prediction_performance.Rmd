@@ -43,12 +43,6 @@ library(tidyverse)
 theme_set(theme_bw())
 ```
 
-## Prep Google Drive Authentication
-
-```{r, include = FALSE}
-drive_auth(email = 'hrodenhizer@woodwellclimate.org')
-```
-
 
 ## Define Functions
 
