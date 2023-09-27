@@ -526,27 +526,27 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
 
 ```
 
-### plot_prediction
+### plot_pred
 
 ```{r}
-plot_prediction <- function(pid) {
+plot_pred <- function(pid) {
   
   # get polygon data
-  current_data <- polys %>%
+  current_polys <- polys %>%
     filter(id == pid) %>%
     select(imagery, id, status, rts_iou, pq_ci, pq_ci_size, bbox_geometry, 
            mask_geometry, rts_geometry, val_geometry, pred_geometry) %>%
     mutate(status = factor(status, levels = c('Active', 'General')))
   
   # prep RGB data
-  current_rgb <- input_data %>%
+  current_rast <- input_data %>%
     filter(id == pid) %>%
-    full_join(current_data %>%
+    full_join(current_polys %>%
                 select(id, imagery, rts_iou),
               by = c('imagery', 'id', 'rts_iou'))
   
-  figure <- ggplot(data = current_data) +
-    geom_raster(data = current_rgb,
+  figure <- ggplot(data = current_polys) +
+    geom_raster(data = current_rast,
                 aes(x = x, y = y, fill = color_hex),
                 inherit.aes = FALSE) +
     scale_fill_manual(breaks = levels(input_data$color_hex),
@@ -624,27 +624,27 @@ plot_prediction <- function(pid) {
 }
 ```
 
-### plot_prediction_2
+### plot_pred_2
 
 ```{r}
-plot_prediction_2 <- function(pid, imagery_types, dims) {
+plot_pred_2 <- function(pid, imagery_types, dims) {
   
   # get polygon data
-  current_data <- polys %>%
+  current_polys <- polys %>%
     filter(id == pid) %>%
     select(imagery, id, status, rts_iou, pq_ci, pq_ci_size, bbox_geometry, 
            mask_geometry, rts_geometry, val_geometry, pred_geometry) %>%
     mutate(status = factor(status, levels = c('Active', 'General')))
   
   # prep RGB data
-  current_rgb <- input_data %>%
+  current_rast <- input_data %>%
     filter(id == pid) %>%
-    full_join(current_data %>%
+    full_join(current_polys %>%
                 select(id, imagery, rts_iou),
               by = c('imagery', 'id', 'rts_iou'))
   
   # get desired extent of current tile
-  current_dims <- current_data %>%
+  current_dims <- current_polys %>%
     slice(1) %>%
     st_as_sf(crs = 3413) %>%
     bind_cols(map_dfr(.$rts_geometry, 
@@ -658,12 +658,81 @@ plot_prediction_2 <- function(pid, imagery_types, dims) {
   # make a map for each imagery type separately
   figures <- map(
     imagery_types,
-    ~ plot_individual_prediction(.x, current_rgb, current_data, current_dims)
+    ~ plot_individual_prediction(.x, current_rast, current_polys, current_dims)
   )
   
   figure <- figures[[1]] | figures[[2]] | figures[[3]]
 
   return(figure)
+  
+}
+```
+
+### plot_pred_prob
+
+```{r}
+plot_pred_prob <- function(pid) {
+  
+  # get polygon data
+  current_polys <- polys %>%
+    filter(id == pid) %>%
+    select(imagery, id, status, rts_iou, pq_ci, pq_ci_size, bbox_geometry, 
+           mask_geometry, rts_geometry, val_geometry, pred_geometry) %>%
+    mutate(status = factor(status, levels = c('Active', 'General')))
+  
+  # prep RGB/prediction data
+  current_rast <- input_data %>%
+    filter(id == pid) %>%
+    full_join(current_polys %>%
+                select(id, imagery, rts_iou),
+              by = c('imagery', 'id', 'rts_iou'))
+  
+  figure <- ggplot(data = current_polys) +
+    geom_raster(data = current_rast,
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    new_scale('fill') +
+    geom_raster(data = current_rast,
+            aes(x = x, y = y, fill = prediction),
+            inherit.aes = FALSE,
+            alpha = 0.3) +
+    scale_fill_gradient2(low = 'blue',
+                         mid = 'white',
+                         high = 'red',
+                         midpoint = 0.5,
+                         limits = c(0, 1)) +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation',
+                linewidth = 'Validation'),
+            fill = 'transparent') +
+    scale_color_manual(name = '',
+                       values = c('gray10'),
+                       guide = guide_legend(order = 4)) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.25),
+                       guide = guide_legend(order = 4)) +
+    facet_grid(
+      paste('ID:', str_remove(id, "^0+")) ~ 
+        imagery + paste('RTS IoU:', round(rts_iou, 2))
+      ) +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          legend.position = 'bottom') +
+    coord_sf(expand = FALSE) +
+    ggtitle(paste('ID:', current_polys$id[1]))
+
+  print(figure)
+  
+  # ggsave(paste0('./figures/rts_features/', pid, '.pdf'),
+  #        figure,
+  #        height = 3,
+  #        width = 6.5)
+
+  # return(figure)
   
 }
 ```
@@ -2548,6 +2617,15 @@ rts_labeller <- as_labeller(c(WorldView = 'WorldView', PlanetScope = 'PlanetScop
 
 ```
 
+Maps of Prediction Probability
+
+```{r, fig.width = 23, fig.height = 12}
+rts_prob_maps <- map(
+  pred_ids,
+  ~ plot_pred_prob(.x)
+)
+```
+
 NIR/NDVI
 
 ```{r}
@@ -3843,7 +3921,7 @@ map_dimensions <- polys %>%
 
 rts_maps_subset <- map(
   id_subset,
-  ~ plot_prediction_2(.x, imagery_labels, map_dimensions)
+  ~ plot_pred_2(.x, imagery_labels, map_dimensions)
 )
 ```
 
@@ -3896,7 +3974,7 @@ Visualize the RTS predictions
 
 ```{r fig.width = 12, fig.height = 4.8}
 rts_maps <- map(pred_ids,
-                 ~ plot_prediction(.x))
+                 ~ plot_pred(.x))
 walk(rts_maps,
      ~ print(.x))
 ```
