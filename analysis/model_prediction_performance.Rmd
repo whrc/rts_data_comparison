@@ -1517,7 +1517,7 @@ site_map <- ggplot(world_north) +
   scale_color_viridis(name = 'Region',
                       discrete = TRUE,
                       guide = 'none',
-                      na.value = 'gray50') +
+                      na.value = 'gray10') +
   # geom_text()
   theme_void()
 
