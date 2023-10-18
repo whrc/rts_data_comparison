@@ -1761,14 +1761,14 @@ knitr::kable(imagery_performance_summary)
 
 
 ```{r}
-rts_summaries <- polys %>%
+rts_size_summaries <- polys %>%
   as_tibble() %>%
   summarise(mean_size = mean(rts_area),
             min_size = min(rts_area),
             max_size = max(rts_area),
             median_size = median(rts_area),
             .by = 'yg')
-knitr::kable(rts_summaries)
+knitr::kable(rts_size_summaries)
 ```
 
 ### `nls` Models
@@ -1823,7 +1823,7 @@ summary(sentinel_iou_nls)
 Table for nls model summaries
 
 ```{r}
-rts_iou_summary <- tidy(maxar_iou_nls) %>%
+rts_iou_model_summary <- tidy(maxar_iou_nls) %>%
   mutate(Imagery = 'WorldView') %>%
   rbind(tidy(planet_iou_nls) %>%
           mutate(Imagery = 'PlanetScope')) %>%
@@ -1835,11 +1835,11 @@ rts_iou_summary <- tidy(maxar_iou_nls) %>%
   select(Imagery, Term = term, Estimate = estimate, SE = std.error, 
          `t-statistic` = statistic, `p-value` = p.value)
 
-# write.csv(rts_iou_summary,
+# write.csv(rts_iou_model_summary,
 #           './tables/iou_size_nls.csv',
 #           row.names = FALSE)
 
-knitr::kable(rts_iou_summary)
+knitr::kable(rts_iou_model_summary)
 ```
 
 Bootstrap predictions for plotting the `nls` models
@@ -2106,7 +2106,7 @@ sentinel_cross <- sentinel_est %>%
   as.numeric() # find closest to 1e-05
 
 size_thresholds <- tibble(imagery = c('WorldView', 'PlanetScope', 'Sentinel-2'),
-                          rts_threshold = c(maxar_cross, 
+                          convergence_threshold = c(maxar_cross, 
                                             planet_cross, 
                                             sentinel_cross))
 rm(maxar_d1, planet_d1, sentinel_d1,
@@ -2116,30 +2116,29 @@ rm(maxar_d1, planet_d1, sentinel_d1,
 ```
 
 ```{r}
-rts_iou_thresholds <- polys %>%
+rts_iou_summary <- polys %>%
   as_tibble() %>%
   summarise(rts_iou_mean = mean(rts_iou),
             rts_sd = sd(rts_iou),
-            .by = imagery) %>%
-  mutate(rts_iou_threshold = rts_iou_mean)
+            .by = imagery)
 
 polys <- polys %>%
   mutate(
     size_threshold = case_when(
       imagery == 'WorldView' ~ 
-        filter(size_thresholds, imagery == 'WorldView')$rts_threshold,
+        filter(size_thresholds, imagery == 'WorldView')$convergence_threshold,
       imagery == 'PlanetScope' ~ 
-        filter(size_thresholds, imagery == 'PlanetScope')$rts_threshold,
+        filter(size_thresholds, imagery == 'PlanetScope')$convergence_threshold,
       imagery == 'Sentinel-2' ~ 
-        filter(size_thresholds, imagery == 'Sentinel-2')$rts_threshold
+        filter(size_thresholds, imagery == 'Sentinel-2')$convergence_threshold
     ),
     iou_threshold = case_when(
       imagery == 'WorldView' ~ 
-        filter(rts_iou_thresholds, imagery == 'WorldView')$rts_iou_threshold,
+        filter(rts_iou_summary, imagery == 'WorldView')$rts_iou_mean,
       imagery == 'PlanetScope' ~ 
-        filter(rts_iou_thresholds, imagery == 'PlanetScope')$rts_iou_threshold,
+        filter(rts_iou_summary, imagery == 'PlanetScope')$rts_iou_mean,
       imagery == 'Sentinel-2' ~ 
-        filter(rts_iou_thresholds, imagery == 'Sentinel-2')$rts_iou_threshold
+        filter(rts_iou_summary, imagery == 'Sentinel-2')$rts_iou_mean
     ),
     pq_ci = factor(
       case_when(
@@ -2159,10 +2158,10 @@ polys <- polys %>%
   )
 ```
 
-Size at which predicted RTS IoU is higher than the median RTS IoU
+Model performance thresholds
 
 ```{r}
-min_rts_area <- iou_ci %>%
+size_thresholds <- iou_ci %>%
   left_join(polys %>%
               as_tibble() %>%
               summarise(rts_iou_median = median(rts_iou), 
@@ -2174,7 +2173,7 @@ min_rts_area <- iou_ci %>%
          .by = imagery
     ) %>%
   left_join(size_thresholds %>%
-              mutate(rts_threshold = ceiling(rts_threshold/100)*100),
+              mutate(convergence_threshold = ceiling(convergence_threshold/100)*100),
             by = 'imagery') %>%
   select(-rts_area) %>%
   left_join(iou_ci %>%
@@ -2185,13 +2184,14 @@ min_rts_area <- iou_ci %>%
   mutate(rts_area_exceed_0.5 = ceiling(rts_area/100)*100) %>%
   select(`Imagery` = imagery,
          `Detection Threshold` = rts_area_exceed_0.5, 
-         `RTS Area Threshold Where Slope <1e-05` = rts_threshold)
+         `Model Convergence Threshold` = convergence_threshold)
 
-# write.csv(min_rts_area,
+# write.csv(size_thresholds,
 #           './tables/rts_area_thresholds.csv',
 #           row.names = FALSE)
 
-knitr::kable(min_rts_area)
+knitr::kable(size_thresholds)
+
 ```
 
 ```{r, fig.width = 6.5, fig.height = 4}
@@ -2232,6 +2232,140 @@ ggplot(polys,
 #        width = 6.5)
 ```
 
+```{r, fig.width = 4, fig.height = 3}
+# threshold explanation figure
+threshold_examples <- size_thresholds %>%
+  filter(Imagery == 'WorldView')
+
+convergence_threshold_y = iou_ci %>%
+  filter(
+    imagery == 'WorldView' & 
+      abs(rts_area - segments$`Model Convergence Threshold`) == min(abs(rts_area - segments$`Model Convergence Threshold`))
+                 ) %>%
+  pull(prediction)
+
+vmax <- rts_iou_model_summary %>%
+  filter(Imagery == 'WorldView' & Term == 'Vmax') %>%
+  pull(Estimate)
+
+ggplot(iou_ci %>%
+         filter(imagery == 'WorldView'),
+            aes(x = rts_area, y = prediction)) +
+  geom_line(color = 'gray50') +
+  # Detection Threshold
+  geom_segment(x = 0,
+               xend = threshold_examples$`Detection Threshold`,
+               y = 0.5,
+               yend = 0.5,
+               color = 'black',
+               linewidth = 0.1,
+               linetype = 'dashed') +
+  geom_text(
+    data = tibble(
+      x = threshold_examples$`Detection Threshold`/2,
+      y = 0.5,
+      label = 'IoU = 0.5'
+    ),
+    aes(x = x, 
+        y = y, 
+        label = label),
+    vjust = 0,
+    nudge_y = 0.01,
+    size = 2.5
+  ) +
+  geom_segment(x = threshold_examples$`Detection Threshold`,
+               xend = threshold_examples$`Detection Threshold`,
+               y = 0.5,
+               yend = 0,
+               color = 'black',
+               linewidth = 0.1,
+               arrow = arrow(length = unit(0.3, 'cm'))) +
+  geom_text(data = tibble(x = threshold_examples$`Detection Threshold`,
+                   y = 0.25,
+                   label = 'Detection Threshold'),
+            aes(x = x, y = y, label = label),
+            angle = 90,
+            color = 'black',
+            size = 2.5,
+            vjust = 0,
+            nudge_x = -500) +
+  # Model Convergence Threshold
+  geom_segment(x = threshold_examples$`Model Convergence Threshold` - 5000,
+               xend = threshold_examples$`Model Convergence Threshold` + 5000,
+               y = convergence_threshold_y - (1e-05*5000),
+               yend = convergence_threshold_y + (1e-05*5000),
+               color = 'black',
+               linewidth = 0.1,
+               linetype = 'dashed') +
+  geom_text(
+    data = tibble(
+      x = threshold_examples$`Model Convergence Threshold`,
+      y = convergence_threshold_y/2,
+      label = 'Model\nConvergence Threshold'
+    ),
+    aes(x = x, y = y, label = label),
+    angle = 90,
+    color = 'black',
+    size = 2.5,
+    vjust = 0,
+    nudge_x = -500
+    ) +
+  geom_segment(x = threshold_examples$`Model Convergence Threshold`,
+               xend = threshold_examples$`Model Convergence Threshold`,
+               y = convergence_threshold_y,
+               yend = 0,
+               color = 'black',
+               linewidth = 0.1,
+               arrow = arrow(length = unit(0.3, 'cm'))) +
+  geom_text(
+    data = tibble(
+      x = threshold_examples$`Model Convergence Threshold`,
+      y = convergence_threshold_y,
+      label = 'Slope = 1e-05'
+    ),
+    aes(x = x, 
+        y = y, 
+        label = label),
+    angle = 27,
+    vjust = 0,
+    nudge_y = 0.01,
+    size = 2.5
+  ) +
+  # Vmax
+  geom_segment(x = 50000,
+               xend = 0,
+               y = vmax,
+               yend = vmax,
+               linewidth = 0.1,
+               arrow = arrow(length = unit(0.3, 'cm'))) +
+  geom_text(
+    data = tibble(
+      x = 50000/2,
+      y = vmax,
+      label = as.character(expression('V'[max]))
+    ),
+    aes(x = x, y = y, label = label),
+    color = 'black',
+    size = 2.5,
+    vjust = 0,
+    nudge_y = 0.01,
+    parse = TRUE
+  ) +
+  scale_x_continuous(name = 'RTS Area',
+                     limits = c(0, 50000)) +
+  scale_y_continuous(name = 'Predicted IoU',
+                     limits = c(0, 1)) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+  
+ggsave('./figures/threshold_demonstration.pdf',
+       height = 5,
+       width = 5)
+ggsave('./figures/threshold_demonstration.jpg',
+       height = 5,
+       width = 5)
+```
+
 ```{r, fig.width = 12}
 ggplot(polys, 
        aes(x = rts_area, 
@@ -2250,8 +2384,9 @@ ggplot(polys,
   geom_line(data = iou_ci,
             aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
-  geom_vline(data = size_thresholds,
-             aes(xintercept = rts_threshold, color = imagery),
+  geom_vline(data = size_thresholds %>%
+               rename(imagery = Imagery),
+             aes(xintercept = `Model Convergence Threshold`, color = imagery),
             linetype = 'dashed') +
   scale_color_manual(name = 'Imagery',
                      values = imagery_colors) +
