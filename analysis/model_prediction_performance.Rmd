@@ -1941,7 +1941,8 @@ ggplot(polys, aes(x = rts_area, y = rts_iou, color = imagery)) +
   geom_line(data = iou_ci, 
             aes(x = rts_area, y = prediction, color = imagery),
             inherit.aes = FALSE) +
-  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_x_continuous(name = expression('RTS Area (ha)'),
+                     labels = function(x)x/10000) +
   scale_y_continuous(name = 'RTS IoU',
                      limits = c(0, 1)) +
   scale_color_manual(values = imagery_colors,
@@ -1958,7 +1959,7 @@ knitr::kable(
     as_tibble() %>%
     filter(rts_iou == 0) %>%
     summarise(missed_feature_count = n(),
-              max_area = max(rts_area),
+              max_area = max(rts_area)/10000,
               .by = 'imagery')
 )
 
@@ -2082,8 +2083,10 @@ maxar_d1 <- D(expression(y = 0.8064456 * x / (3089.6118432 + x)), name = 'x')
 planet_d1 <- D(expression(y = 0.7622447 * x / (3940.7125511 + x)), name = 'x')
 sentinel_d1 <- D(expression(y = 0.6637391 * x / (3750.5895223 + x)), name = 'x')
 
-# estimate where the derivative crosses 1e-05
+# estimate where the derivative crosses slope_threshold
 estimate_grid <- tibble(rts_area = seq(10000, 70000, by = 0.1))
+
+slope_threshold <- 1e-06
 
 maxar_est <- estimate_grid %>%
   mutate(slope_est = eval_expression(maxar_d1, rts_area))
@@ -2093,17 +2096,17 @@ sentinel_est <- estimate_grid %>%
   mutate(slope_est = eval_expression(sentinel_d1, rts_area))
 
 maxar_cross <- maxar_est %>%
-  slice(which.min(abs(1e-05-slope_est))) %>%
+  slice(which.min(abs(slope_threshold-slope_est))) %>%
   select(rts_area) %>%
-  as.numeric() # find closest to 1e-05
+  as.numeric() # find closest to slope_threshold
 planet_cross <- planet_est %>%
-  slice(which.min(abs(1e-05-slope_est))) %>%
+  slice(which.min(abs(slope_threshold-slope_est))) %>%
   select(rts_area) %>%
-  as.numeric() # find closest to 1e-05
+  as.numeric() # find closest to slope_threshold
 sentinel_cross <- sentinel_est %>%
-  slice(which.min(abs(1e-05-slope_est))) %>%
+  slice(which.min(abs(slope_threshold-slope_est))) %>%
   select(rts_area) %>%
-  as.numeric() # find closest to 1e-05
+  as.numeric() # find closest to slope_threshold
 
 size_thresholds <- tibble(imagery = c('WorldView', 'PlanetScope', 'Sentinel-2'),
                           convergence_threshold = c(maxar_cross, 
@@ -2172,8 +2175,7 @@ size_thresholds <- iou_ci %>%
     abs(prediction - rts_iou_median) == min(abs(prediction - rts_iou_median)),
          .by = imagery
     ) %>%
-  left_join(size_thresholds %>%
-              mutate(convergence_threshold = ceiling(convergence_threshold/100)*100),
+  left_join(size_thresholds,
             by = 'imagery') %>%
   select(-rts_area) %>%
   left_join(iou_ci %>%
@@ -2181,12 +2183,12 @@ size_thresholds <- iou_ci %>%
               summarise(rts_area = first(rts_area), 
                         .by = imagery),
             by = 'imagery') %>%
-  mutate(rts_area_exceed_0.5 = ceiling(rts_area/100)*100) %>%
   select(`Imagery` = imagery,
-         `Detection Threshold` = rts_area_exceed_0.5, 
+         `Detection Threshold` = rts_area, 
          `Model Convergence Threshold` = convergence_threshold)
 
-# write.csv(size_thresholds,
+# write.csv(size_thresholds %>%
+#             mutate(round(across(matches('Threshold'), ~ .x/10000), 2)),
 #           './tables/rts_area_thresholds.csv',
 #           row.names = FALSE)
 
@@ -2212,8 +2214,9 @@ ggplot(polys,
             inherit.aes = FALSE) +
   scale_color_manual(name = 'Imagery',
                      values = imagery_colors) +
-  scale_x_continuous(name = expression('RTS Area (m'^2*')'),
-                     minor_breaks = seq(0, 125000, by = 5000)) +
+  scale_x_continuous(name = expression('RTS Area (ha)'),
+                     minor_breaks = seq(0, 125000, by = 5000),
+                     labels = function(x)x/10000) +
   scale_y_continuous(name = 'RTS IoU',
                      limits = c(-0.1, 1),
                      expand = expansion(mult = 0),
@@ -2232,37 +2235,43 @@ ggplot(polys,
 #        width = 6.5)
 ```
 
-```{r, fig.width = 4, fig.height = 3}
+```{r}
 # threshold explanation figure
 threshold_examples <- size_thresholds %>%
   filter(Imagery == 'WorldView')
 
-convergence_threshold_y = iou_ci %>%
-  filter(
-    imagery == 'WorldView' & 
-      abs(rts_area - segments$`Model Convergence Threshold`) == min(abs(rts_area - segments$`Model Convergence Threshold`))
-                 ) %>%
-  pull(prediction)
+convergence_threshold_y = my_nlsBootPredict(
+  maxar_iou_boot, 
+  newdata = tibble(rts_area = c(10000, threshold_examples$`Model Convergence Threshold`)),
+  interval = 'prediction')[2, 1]
 
 vmax <- rts_iou_model_summary %>%
   filter(Imagery == 'WorldView' & Term == 'Vmax') %>%
   pull(Estimate)
 
+x_limits <- c(0, 100000)
+```
+
+```{r, fig.width = 3.25, fig.height = 2.5}
 ggplot(iou_ci %>%
          filter(imagery == 'WorldView'),
             aes(x = rts_area, y = prediction)) +
-  geom_line(color = 'gray50') +
+  geom_line(color = 'gray50',
+            linewidth = 0.25) +
   # Detection Threshold
-  geom_segment(x = 0,
-               xend = threshold_examples$`Detection Threshold`,
-               y = 0.5,
-               yend = 0.5,
-               color = 'black',
-               linewidth = 0.1,
-               linetype = 'dashed') +
+  geom_segment(
+    data = tibble(
+      x = 0,
+      xend = threshold_examples$`Detection Threshold`,
+      y = 0.5,
+      yend = 0.5),
+    aes(x = x, xend = xend, y = y, yend = yend),
+    color = 'black',
+    linewidth = 0.5,
+    linetype = 'dashed') +
   geom_text(
     data = tibble(
-      x = threshold_examples$`Detection Threshold`/2,
+      x = threshold_examples$`Detection Threshold`,
       y = 0.5,
       label = 'IoU = 0.5'
     ),
@@ -2270,77 +2279,92 @@ ggplot(iou_ci %>%
         y = y, 
         label = label),
     vjust = 0,
-    nudge_y = 0.01,
+    nudge_y = 0.015,
     size = 2.5
   ) +
-  geom_segment(x = threshold_examples$`Detection Threshold`,
-               xend = threshold_examples$`Detection Threshold`,
-               y = 0.5,
-               yend = 0,
-               color = 'black',
-               linewidth = 0.1,
-               arrow = arrow(length = unit(0.3, 'cm'))) +
+  geom_segment(
+    data = tibble(
+      x = threshold_examples$`Detection Threshold`,
+      xend = threshold_examples$`Detection Threshold`,
+      y = 0.5,
+      yend = 0),
+    aes(x = x, xend = xend, y = y, yend = yend),
+    color = 'black',
+    linewidth = 0.5,
+    arrow = arrow(length = unit(0.3, 'cm'))) +
   geom_text(data = tibble(x = threshold_examples$`Detection Threshold`,
-                   y = 0.25,
-                   label = 'Detection Threshold'),
+                          y = 0.25,
+                          label = 'Detection\nThreshold'),
             aes(x = x, y = y, label = label),
             angle = 90,
             color = 'black',
             size = 2.5,
-            vjust = 0,
-            nudge_x = -500) +
+            vjust = 1,
+            nudge_x = 3000) +
   # Model Convergence Threshold
-  geom_segment(x = threshold_examples$`Model Convergence Threshold` - 5000,
-               xend = threshold_examples$`Model Convergence Threshold` + 5000,
-               y = convergence_threshold_y - (1e-05*5000),
-               yend = convergence_threshold_y + (1e-05*5000),
-               color = 'black',
-               linewidth = 0.1,
-               linetype = 'dashed') +
+  geom_segment(
+    data = tibble(
+      x = threshold_examples$`Model Convergence Threshold` - 10000,
+      xend = threshold_examples$`Model Convergence Threshold` + 10000,
+      y = convergence_threshold_y - (slope_threshold*10000),
+      yend = convergence_threshold_y + (slope_threshold*10000)
+      ),
+    aes(x = x, xend = xend, y = y, yend = yend),
+    color = 'black',
+    linewidth = 0.5,
+    linetype = 'dashed') +
+  geom_text(
+    data = tibble(
+      x = threshold_examples$`Model Convergence Threshold`,
+      y = convergence_threshold_y,
+      label = paste0('Slope = ', slope_threshold*10000)
+    ),
+    aes(x = x, 
+        y = y, 
+        label = label),
+    linewidth = 0.5,
+    angle = 4,
+    vjust = 0,
+    nudge_y = 0.015,
+    size = 2.5
+  ) +
+  geom_segment(
+    data = tibble(
+      x = threshold_examples$`Model Convergence Threshold`,
+      xend = threshold_examples$`Model Convergence Threshold`,
+      y = convergence_threshold_y,
+      yend = 0),
+    aes(x = x, xend = xend, y = y, yend = yend),
+    color = 'black',
+    linewidth = 0.5,
+    arrow = arrow(length = unit(0.3, 'cm'))) +
   geom_text(
     data = tibble(
       x = threshold_examples$`Model Convergence Threshold`,
       y = convergence_threshold_y/2,
-      label = 'Model\nConvergence Threshold'
+      label = 'Model Convergence\nThreshold'
     ),
     aes(x = x, y = y, label = label),
     angle = 90,
     color = 'black',
     size = 2.5,
-    vjust = 0,
-    nudge_x = -500
+    vjust = 1,
+    nudge_x = 3000
     ) +
-  geom_segment(x = threshold_examples$`Model Convergence Threshold`,
-               xend = threshold_examples$`Model Convergence Threshold`,
-               y = convergence_threshold_y,
-               yend = 0,
-               color = 'black',
-               linewidth = 0.1,
-               arrow = arrow(length = unit(0.3, 'cm'))) +
-  geom_text(
-    data = tibble(
-      x = threshold_examples$`Model Convergence Threshold`,
-      y = convergence_threshold_y,
-      label = 'Slope = 1e-05'
-    ),
-    aes(x = x, 
-        y = y, 
-        label = label),
-    angle = 27,
-    vjust = 0,
-    nudge_y = 0.01,
-    size = 2.5
-  ) +
   # Vmax
-  geom_segment(x = 50000,
-               xend = 0,
-               y = vmax,
-               yend = vmax,
-               linewidth = 0.1,
-               arrow = arrow(length = unit(0.3, 'cm'))) +
+  geom_segment(
+    data = tibble(
+      x = x_limits[2],
+      xend = 0,
+      y = vmax,
+      yend = vmax
+    ),
+    aes(x = x, xend = xend, y = y, yend = yend),
+    linewidth = 0.5,
+    arrow = arrow(length = unit(0.3, 'cm'))) +
   geom_text(
     data = tibble(
-      x = 50000/2,
+      x = x_limits[2]/2,
       y = vmax,
       label = as.character(expression('V'[max]))
     ),
@@ -2351,19 +2375,19 @@ ggplot(iou_ci %>%
     nudge_y = 0.01,
     parse = TRUE
   ) +
-  scale_x_continuous(name = 'RTS Area',
-                     limits = c(0, 50000)) +
+  scale_x_continuous(name = 'RTS Area (ha)',
+                     limits = x_limits) +
   scale_y_continuous(name = 'Predicted IoU',
                      limits = c(0, 1)) +
   theme(axis.text.x = element_blank(),
         axis.ticks.x = element_blank())
   
 ggsave('./figures/threshold_demonstration.pdf',
-       height = 5,
-       width = 5)
+       height = 2.5,
+       width = 3.25)
 ggsave('./figures/threshold_demonstration.jpg',
-       height = 5,
-       width = 5)
+       height = 2.5,
+       width = 3.25)
 ```
 
 ```{r, fig.width = 12}
@@ -2390,7 +2414,8 @@ ggplot(polys,
             linetype = 'dashed') +
   scale_color_manual(name = 'Imagery',
                      values = imagery_colors) +
-  scale_x_continuous(name = expression('RTS Area (m'^2*')')) +
+  scale_x_continuous(name = expression('RTS Area (ha)'),
+                     labels = function(x)x/10000) +
   scale_y_continuous(name = 'RTS IoU') +
   scale_shape_manual(name = 'Region',
                      values = c(1, 16)) +
@@ -3433,7 +3458,8 @@ ggplot(polys,
        aes(x = rts_shape, y = rts_area, color = pq_ci)) +
   geom_point() +
   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
-  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
+  scale_y_log10(name = expression('RTS Area (ha)'),
+                labels = function(x)x/10000,
                 minor_breaks = c(seq(100, 900, by = 100),
                            seq(1000, 9000, by = 1000),
                            seq(10000, 90000, by = 10000),
@@ -3451,8 +3477,8 @@ rts_shape_area_iou <- ggplot(polys,
        aes(x = rts_shape, y = rts_area, color = rts_iou, shape = yg)) +
   geom_point() +
   scale_x_continuous(name = 'RTS Shape (Polsby-Popper)') +
-  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
-                labels = scales::label_number(big.mark = ''),
+  scale_y_log10(name = expression('RTS Area (ha)'),
+                labels = function(x)x/10000,
                 minor_breaks = c(seq(100, 900, by = 100),
                            seq(1000, 9000, by = 1000),
                            seq(10000, 90000, by = 10000),
@@ -3587,8 +3613,8 @@ rts_area_hist <- ggplot(polys, aes(x = rts_area, fill = region)) +
   geom_density(alpha = 0.5) +
   scale_fill_viridis(name = 'Region',
                     discrete = TRUE) +
-  scale_x_log10(name = expression('RTS Area (m'^2*')'),
-                labels = scales::label_number(big.mark = ''),
+  scale_x_log10(name = expression('RTS Area (ha)'),
+                     labels = function(x)x/10000,
                 minor_breaks = c(seq(100, 900, by = 100),
                            seq(1000, 9000, by = 1000),
                            seq(10000, 90000, by = 10000),
@@ -3680,7 +3706,8 @@ rts_area_shape_hist
 ```{r}
 ggplot(polys, aes(x = region, y = rts_area)) +
   geom_point(aes(color = pq_ci)) +
-  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
+  scale_y_log10(name = expression('RTS Area (ha)'),
+                labels = function(x)x/10000,
                 minor_breaks = c(seq(100, 900, by = 100),
                            seq(1000, 9000, by = 1000),
                            seq(10000, 90000, by = 10000),
@@ -3693,7 +3720,8 @@ ggplot(polys, aes(x = region, y = rts_area)) +
 
 ggplot(polys, aes(x = region, y = rts_area)) +
   geom_point(aes(color = rts_iou)) +
-  scale_y_log10(name = expression('RTS Area (m'^2 * ')'),
+  scale_y_log10(name = expression('RTS Area (mha)'),
+                labels = function(x)x/10000,
                 minor_breaks = c(seq(100, 900, by = 100),
                            seq(1000, 9000, by = 1000),
                            seq(10000, 90000, by = 10000),
@@ -3998,7 +4026,8 @@ Whether or not all the models were able to predict a feature well did not correl
 ggplot(polys,
        aes(x = rts_area, y = rts_shape, color = factor(pq_n_unique))) +
   geom_point() +
-  scale_x_log10(name = expression('RTS Area (m'^2 * ')')) +
+  scale_x_log10(name = expression('RTS Area (ha)'),
+                labels = function(x)x/10000) +
   scale_y_continuous(name = 'RTS Shape') +
   scale_color_viridis(name = 'Number of Unique\nPrediction Quality\nDesignations Across\nImagery Types',
                       discrete = TRUE)
