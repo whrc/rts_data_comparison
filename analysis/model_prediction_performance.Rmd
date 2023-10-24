@@ -8,8 +8,7 @@ output:
 
 ## TODO:
 
-- try making crop polygon over north pole by buffering a point and using `st_wrap_dateline()` to get rid of extra lines introduced into country outlines
--   Finalize RTS sample figure. Show outlines of predictions for all features within one tile? Fix RTS label justification when ggplot2 is next updated. Make the figure narrower? Add labels for region?
+- decide whether to add undetected RTS category to pq_ci
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -1306,14 +1305,7 @@ val_polys <- maxar_val_polys %>%
 polys <- polys %>%
   full_join(val_polys %>%
               as_tibble(),
-            by = c('id', 'imagery')) %>%
-  mutate(
-    val_area = as.numeric(st_area(val_geometry)),
-    val_shape = as.numeric(
-      4*pi*val_area/st_perimeter(val_geometry)^2
-      ) # calculate Polsby-Popper value (shape compactness/roundness)
-    )
-
+            by = c('id', 'imagery'))
 rm(maxar_val_polys, planet_val_polys, sentinel_val_polys, val_polys)
 ```
 
@@ -1377,9 +1369,9 @@ polys <- polys %>%
                                         ~ st_intersection(...)),
                                    crs = crs(polys)),
          pred_bg_geometry = st_as_sfc(pmap(list(pred_bg_geometry, 
-                                                 mask_geometry), 
-                                            ~ st_intersection(...)),
-                                       crs = crs(polys)),
+                                                mask_geometry), 
+                                           ~ st_intersection(...)),
+                                      crs = crs(polys)),
          val_mask_geometry = st_as_sfc(pmap(list(val_geometry, 
                                                  mask_geometry), 
                                             ~ st_intersection(...)),
@@ -1388,6 +1380,10 @@ polys <- polys %>%
                                                     mask_geometry), 
                                                ~ st_intersection(...)),
                                           crs = crs(polys)),
+         val_area = as.numeric(st_area(val_mask_geometry)),
+         val_shape = as.numeric(
+           4*pi*val_area/st_perimeter(val_mask_geometry)^2
+         ), # calculate Polsby-Popper value (shape compactness/roundness)
          imagery = factor(imagery,
                           levels = c('WorldView', 'PlanetScope', 'Sentinel-2')))
 rm(masks)
@@ -1701,11 +1697,13 @@ polys <- polys %>%
 ```{r}
 iou <- polys %>%
   as_tibble() %>%
-  summarise(rts_iou = round(mean(rts_iou), 2),
+  summarise(rts_iou_v2 = round(mean(replace(rts_iou, rts_iou == 0, NA), 
+                                    na.rm = TRUE), 2),
+            rts_iou = round(mean(rts_iou), 2),
             mean_iou = round(mean(mean_iou), 2),
             mean_iou_v2 = round(mean(mean_iou_v2), 2),
             .by = 'imagery') %>%
-  select(Imagery = imagery, `RTS IoU` = rts_iou, `Val IoU` = mean_iou, `Val IoU (remove zeros)` = mean_iou_v2)
+  select(Imagery = imagery, `RTS IoU` = rts_iou, `RTS IoU (remove zeros)` = rts_iou_v2, `Val IoU` = mean_iou, `Val IoU (remove zeros)` = mean_iou_v2)
 knitr::kable(iou, caption = 'IoU (Calculated Directly from Predictions)')
 ```
 
@@ -2157,7 +2155,14 @@ polys <- polys %>%
         rts_iou < iou_pred_lwr & rts_area > size_threshold ~ 'Low',
         TRUE ~ 'Expected'
       ),
-      levels = c('High', 'Expected', 'Low'))
+      levels = c('High', 'Expected', 'Low')),
+    pq_ci_undetected = factor(
+      case_when(
+        rts_iou != 0 ~ pq_ci,
+        rts_iou == 0 ~ 'Undetected'
+      ),
+      levels = c('High', 'Expected', 'Low', 'Undetected')
+    )
   )
 ```
 
@@ -2428,6 +2433,11 @@ knitr::kable(polys %>%
                as_tibble() %>%
                count(imagery, pq_ci) %>%
                pivot_wider(names_from = pq_ci, values_from = n))
+
+# knitr::kable(polys %>%
+#                as_tibble() %>%
+#                count(imagery, pq_ci_undetected) %>%
+#                pivot_wider(names_from = pq_ci_undetected, values_from = n))
 ```
 
 Is performance class the same across imagery sources for most RTS features?
@@ -2692,6 +2702,33 @@ zonal_stats_figs[['g_mean']]
 zonal_stats_figs[['b_mean']]
 zonal_stats_figs[['lum_mean']]
 
+delta_fig <- ggplot(zonal_stats %>%
+                        filter(rts_class == 'Delta'), 
+                      aes(x = pq_ci, 
+                          y = lum_mean, 
+                          color = pq_ci)) +
+    geom_boxplot(
+      # outlier.shape = NA
+      ) +
+    geom_signif(data = zonal_stats_contrasts %>%
+                  filter(variable == 'lum_mean' & rts_class == 'Delta'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous('Luminance') +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == 'lum_mean' & rts_class == 'Delta') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+delta_fig
+
 # ggsave('./figures/zonal_stats_red.pdf',
 #        zonal_stats_figs[['r_mean']],
 #        height = 5.5,
@@ -2726,6 +2763,15 @@ zonal_stats_figs[['lum_mean']]
 # ggsave('./figures/zonal_stats_lum.jpg',
 #        zonal_stats_figs[['lum_mean']],
 #        height = 5.5,
+#        width = 6.5)
+# 
+# ggsave('./figures/zonal_stats_lum_delta.pdf',
+#        delta_fig,
+#        height = 3,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_lum_delta.jpg',
+#        delta_fig,
+#        height = 3,
 #        width = 6.5)
 ```
 
@@ -3436,21 +3482,166 @@ No, we can't predict the prediction quality very well based on the input data, f
 ## RTS Morphology
 
 ```{r}
+# impact of rasterization on RTS area
+ggplot(polys %>%
+         filter(imagery == 'WorldView' & rts_area <= val_area),
+       aes(x = rts_area, 
+           y = val_area)) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
+  geom_point() +
+  geom_point(data = polys %>%
+               filter(imagery == 'WorldView' & rts_area > val_area),
+             color = 'gray') +
+  geom_smooth(method = 'lm', color = 'black') +
+  scale_x_continuous(name = 'RTS Area (vector ground truth)') +
+  scale_y_continuous(name = 'Validation Area (raster ground truth)') +
+  coord_fixed()
+
+# there are a few RTS that are too big to fit into the tile, which have been omitted
+vect_rast_area_lm <- model <- linear_reg() %>%
+  fit(val_area ~ rts_area,
+      data = polys %>%
+        filter(imagery == 'WorldView' & rts_area <= val_area))
+vect_rast_area_coefs <- tidy(vect_rast_area_lm)
+vect_rast_area_coefs
+
+# impact of rasterization on RTS shape
 ggplot(polys,
-       aes(x = rts_area, y = pred_area)) +
-  geom_point()
+       aes(x = rts_shape, 
+           y = val_shape)) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'black') +
+  scale_x_continuous(name = 'RTS Shape (vector ground truth)',
+                     limits = c(0, 1)) +
+  scale_y_continuous(name = 'Validation Shape (raster ground truth)',
+                     limits = c(0, 1)) +
+  coord_fixed(expand = FALSE)
+
+
+vect_rast_shape_lm <- linear_reg() %>%
+  fit(val_shape ~ rts_shape,
+      data = polys %>%
+        filter(imagery == 'WorldView'))
+vect_rast_shape_coefs <- tidy(vect_rast_shape_lm)
+vect_rast_shape_coefs
+
+# increase in perimeter associated with rasterizing shape results in about a 39% decrease in polsby popper value
+# the sum of the length of the two sides of and equilateral triangle are 41% longer than the length of the hypotenuse
+# assuming that RTS area is not impacted by the conversion to raster:
+# polsby-popper = 4*pi*Area/Perimeter^2
+# 1/rasterPerimeter^2 * X = 1/vectorPerimeter^2
+# 1/(sqrt(2)*vectorPerimeter)^2 * X = 1/vectorPerimeter^2
+# X = 2; or vectorShape/2 = rasterShape <- this is the maximum difference possible, so the fact that we saw a 39% decrease seems realistic
+
+polys <- polys |>
+  mutate(pred_shape_corr = (
+    pred_shape - as.numeric(vect_rast_shape_coefs[1, 2])
+    )/as.numeric(vect_rast_shape_coefs[2, 2]))
+
+# check if correction looks good
+ggplot(polys,
+       aes(x = rts_shape, 
+           y = (
+             val_shape - 
+             as.numeric(vect_rast_shape_coefs[1, 2])
+             )/as.numeric(vect_rast_shape_coefs[2, 2]))) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'black') +
+  scale_x_continuous(name = 'RTS Shape (vector ground truth)',
+                     limits = c(0, 1)) +
+  scale_y_continuous(name = 'Validation Shape (corrected to vector)',
+                     limits = c(0, 1)) +
+  coord_fixed(expand = FALSE)
+
+# Area
+ggplot(polys,
+       aes(x = rts_area, 
+           y = pred_area)) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'black') +
+  scale_x_continuous(name = 'RTS Area (vector ground truth)') +
+  scale_y_continuous(name = 'Prediction Area (raster prediction)') +
+  facet_grid(. ~ imagery) +
+  coord_fixed()
 
 ggplot(polys,
-       aes(x = val_area, y = pred_area)) +
-  geom_point()
+       aes(x = val_area, 
+           y = pred_area)) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'black') +
+  scale_x_continuous(name = 'Validation Area (raster ground truth)') +
+  scale_y_continuous(name = 'Prediction Area (raster prediction)') +
+  facet_grid(. ~ imagery) +
+  coord_fixed()
+
+# Shape
+prediction_shape <- ggplot(polys,
+       aes(x = rts_shape, 
+           y = pred_shape_corr)) + # use lm to correct for expected shape difference due to data type
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'black') +
+  scale_x_continuous(name = 'RTS Shape',
+                     limits = c(0, 1)) +
+  scale_y_continuous(name = 'Prediction Shape ',
+                     limits = c(0, 1)) +
+  facet_grid(. ~ imagery) +
+  # coord_fixed(expand = FALSE) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+# ggsave('./figures/prediction_shape.pdf',
+#        prediction_shape,
+#        height = 3,
+#        width = 6.5)
+# ggsave('./figures/prediction_shape.jpg',
+#        prediction_shape,
+#        height = 3,
+#        width = 6.5)
+
+ground_pred_shape_lm_1 <- lm(
+  pred_shape_corr ~ rts_shape * imagery,
+  data = polys
+)
+
+summary(ground_pred_shape_lm_1)
+drop1(ground_pred_shape_lm_1)
+emtrends(ground_pred_shape_lm_1,
+        ~ imagery,
+        var = 'rts_shape')
+emtrends(ground_pred_shape_lm_1,
+        ~ imagery,
+        var = 'rts_shape',
+        level = 0.90)
 
 ggplot(polys,
-       aes(x = rts_shape, y = pred_shape)) +
-  geom_point()
+       aes(x = val_shape, 
+           y = pred_shape)) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'black') +
+  scale_x_continuous(name = 'Validation Shape (raster ground truth)',
+                     limits = c(0, 1)) +
+  scale_y_continuous(name = 'Prediction Shape (raster prediction)',
+                     limits = c(0, 1)) +
+  facet_grid(. ~ imagery) +
+  coord_fixed(expand = FALSE) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 
-ggplot(polys,
-       aes(x = val_shape, y = pred_shape)) +
-  geom_point()
+ground_pred_shape_lm_2 <- lm(pred_shape ~ val_shape * imagery,
+                             data = polys)
+summary(ground_pred_shape_lm_2)
+drop1(ground_pred_shape_lm_2)
+emtrends(ground_pred_shape_lm_2,
+        ~ imagery,
+        var = 'val_shape')
+emtrends(ground_pred_shape_lm_2,
+        ~ imagery,
+        var = 'val_shape',
+        level = 0.90)
 ```
 
 ```{r, fig.width = 6.5, fig.height = 6}
