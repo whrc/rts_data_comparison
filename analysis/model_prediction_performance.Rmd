@@ -2702,32 +2702,148 @@ zonal_stats_figs[['g_mean']]
 zonal_stats_figs[['b_mean']]
 zonal_stats_figs[['lum_mean']]
 
-delta_fig <- ggplot(zonal_stats %>%
-                        filter(rts_class == 'Delta'), 
-                      aes(x = pq_ci, 
-                          y = lum_mean, 
-                          color = pq_ci)) +
-    geom_boxplot(
-      # outlier.shape = NA
-      ) +
-    geom_signif(data = zonal_stats_contrasts %>%
-                  filter(variable == 'lum_mean' & rts_class == 'Delta'),
-                aes(x = x_min, y = y, xend = x_max, yend = y,
-                    annotation = star_label, group = contrast),
-                stat="identity",
-                manual = TRUE,
-                inherit.aes = FALSE) +
+lum_delta_fig <- ggplot(
+  zonal_stats %>%
+    filter(rts_class == 'Delta'), 
+  aes(x = pq_ci, 
+      y = lum_mean, 
+      color = pq_ci)
+) +
+  geom_boxplot(
+    # outlier.shape = NA
+  ) +
+  geom_signif(
+    data = zonal_stats_contrasts %>%
+      filter(variable == 'lum_mean' & rts_class == 'Delta'),
+    aes(x = x_min, y = y, xend = x_max, yend = y,
+        annotation = star_label, group = contrast),
+    stat="identity",
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
     scale_x_discrete(name = 'Prediction Quality') +
-    scale_y_continuous('Luminance') +
+    scale_y_continuous(expression(Delta ~ 'Luminance (RTS - BG)')) +
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
-    facet_grid(rts_class ~ imagery) +
+    facet_grid(. ~ imagery) +
     coord_cartesian(ylim = zonal_stats_limits %>%
                       filter(variable == 'lum_mean' & rts_class == 'Delta') %>%
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
-delta_fig
+lum_delta_fig
+
+r_delta_fig <- ggplot(
+  zonal_stats %>%
+    filter(rts_class == 'Delta'), 
+  aes(x = pq_ci, 
+      y = r_mean, 
+      color = pq_ci)
+) +
+  geom_boxplot(
+    # outlier.shape = NA
+  ) +
+  geom_signif(
+    data = zonal_stats_contrasts %>%
+      filter(variable == 'r_mean' & rts_class == 'Delta'),
+    aes(x = x_min, y = y, xend = x_max, yend = y,
+        annotation = star_label, group = contrast),
+    stat="identity",
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(expression(Delta ~ '(RTS - BG)')) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid('Red' ~ imagery) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == 'r_mean' & rts_class == 'Delta') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+
+g_delta_fig <- ggplot(
+  zonal_stats %>%
+    filter(rts_class == 'Delta'), 
+  aes(x = pq_ci, 
+      y = r_mean, 
+      color = pq_ci)
+) +
+  geom_boxplot(
+    # outlier.shape = NA
+  ) +
+  geom_signif(
+    data = zonal_stats_contrasts %>%
+      filter(variable == 'g_mean' & rts_class == 'Delta'),
+    aes(x = x_min, y = y, xend = x_max, yend = y,
+        annotation = star_label, group = contrast),
+    stat="identity",
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(expression(Delta ~ '(RTS - BG)')) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid('Green' ~ imagery) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == 'g_mean' & rts_class == 'Delta') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+
+b_delta_fig <- ggplot(
+  zonal_stats %>%
+    filter(rts_class == 'Delta'), 
+  aes(x = pq_ci, 
+      y = b_mean, 
+      color = pq_ci)
+) +
+  geom_boxplot(
+    # outlier.shape = NA
+  ) +
+  geom_signif(
+    data = zonal_stats_contrasts %>%
+      filter(variable == 'b_mean' & rts_class == 'Delta'),
+    aes(x = x_min, y = y, xend = x_max, yend = y,
+        annotation = star_label, group = contrast),
+    stat="identity",
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(expression(Delta ~ '(RTS - BG)')) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid('Blue' ~ imagery) +
+    coord_cartesian(ylim = zonal_stats_limits %>%
+                      filter(variable == 'b_mean' & rts_class == 'Delta') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+
+rgb_delta_fig <- (
+  r_delta_fig +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.title.y = element_blank(),
+          plot.margin = margin(0, 0, 1, 0, "pt"))
+) / (
+  g_delta_fig +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          strip.text.x = element_blank(),
+          plot.margin = margin(1, 0, 1, 0, "pt"))
+) / (
+    b_delta_fig +
+    theme(axis.title.y = element_blank(),
+          strip.text.x = element_blank(),
+          plot.margin = margin(1, 0, 0, 0, "pt"))
+  )
+rgb_delta_fig
 
 # ggsave('./figures/zonal_stats_red.pdf',
 #        zonal_stats_figs[['r_mean']],
@@ -2766,12 +2882,21 @@ delta_fig
 #        width = 6.5)
 # 
 # ggsave('./figures/zonal_stats_lum_delta.pdf',
-#        delta_fig,
+#        lum_delta_fig,
 #        height = 3,
 #        width = 6.5)
 # ggsave('./figures/zonal_stats_lum_delta.jpg',
-#        delta_fig,
+#        lum_delta_fig,
 #        height = 3,
+#        width = 6.5)
+#
+# ggsave('./figures/zonal_stats_rgb_delta.pdf',
+#        rgb_delta_fig,
+#        height = 5,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_rgb_delta.jpg',
+#        rgb_delta_fig,
+#        height = 5,
 #        width = 6.5)
 ```
 
@@ -3458,18 +3583,18 @@ autoplot(zonal_stats_pca,
 
 ```{r}
 pq_rf <- randomForest::randomForest(pq_ci ~ .,
-                      data = zonal_stats %>%
-                        as_tibble() %>%
-                        select(-c(id, rts_iou, mean_iou, mean_iou_v2, 
-                                  pq_ci_size, prediction_mean_rts,
-                                  prediction_mean_bg)) %>%
-                        mutate(rts_class = case_when(
-                          rts_class == 'RTS' ~ 'rts',
-                          rts_class == 'Delta' ~ 'delta',
-                          rts_class == 'Background' ~ 'bg')
-                        ) %>%
-                        pivot_wider(names_from = rts_class,
-                                    values_from = r_mean:sr_sd))
+                                    data = zonal_stats %>%
+                                      as_tibble() %>%
+                                      select(-c(id, rts_iou, mean_iou, mean_iou_v2, 
+                                                pq_ci_size, prediction_mean_rts,
+                                                prediction_mean_bg)) %>%
+                                      mutate(rts_class = case_when(
+                                        rts_class == 'RTS' ~ 'rts',
+                                        rts_class == 'Delta' ~ 'delta',
+                                        rts_class == 'Background' ~ 'bg')
+                                      ) %>%
+                                      pivot_wider(names_from = rts_class,
+                                                  values_from = r_mean:sr_sd))
 ```
 
 ```{r}
@@ -3481,7 +3606,7 @@ No, we can't predict the prediction quality very well based on the input data, f
 
 ## RTS Morphology
 
-```{r}
+```{r, fig.height = 4.5, fig.width = 6.5}
 # impact of rasterization on RTS area
 ggplot(polys %>%
          filter(imagery == 'WorldView' & rts_area <= val_area),
@@ -3506,11 +3631,15 @@ vect_rast_area_coefs <- tidy(vect_rast_area_lm)
 vect_rast_area_coefs
 
 # impact of rasterization on RTS shape
-ggplot(polys,
+ggplot(polys %>%
+         filter(imagery == 'WorldView' & rts_area <= val_area),
        aes(x = rts_shape, 
            y = val_shape)) +
   geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
   geom_point() +
+  geom_point(data = polys %>%
+               filter(imagery == 'WorldView' & rts_area > val_area),
+             color = 'gray') +
   geom_smooth(method = 'lm', color = 'black') +
   scale_x_continuous(name = 'RTS Shape (vector ground truth)',
                      limits = c(0, 1)) +
@@ -3522,7 +3651,7 @@ ggplot(polys,
 vect_rast_shape_lm <- linear_reg() %>%
   fit(val_shape ~ rts_shape,
       data = polys %>%
-        filter(imagery == 'WorldView'))
+        filter(imagery == 'WorldView' & rts_area <= val_area))
 vect_rast_shape_coefs <- tidy(vect_rast_shape_lm)
 vect_rast_shape_coefs
 
@@ -3537,17 +3666,21 @@ vect_rast_shape_coefs
 polys <- polys |>
   mutate(pred_shape_corr = (
     pred_shape - as.numeric(vect_rast_shape_coefs[1, 2])
-    )/as.numeric(vect_rast_shape_coefs[2, 2]))
+  )/as.numeric(vect_rast_shape_coefs[2, 2]))
 
 # check if correction looks good
-ggplot(polys,
+ggplot(polys %>%
+         filter(imagery == 'WorldView' & rts_area <= val_area),
        aes(x = rts_shape, 
            y = (
              val_shape - 
-             as.numeric(vect_rast_shape_coefs[1, 2])
-             )/as.numeric(vect_rast_shape_coefs[2, 2]))) +
+               as.numeric(vect_rast_shape_coefs[1, 2])
+           )/as.numeric(vect_rast_shape_coefs[2, 2]))) +
   geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
   geom_point() +
+  geom_point(data = polys %>%
+               filter(imagery == 'WorldView' & rts_area > val_area),
+             color = 'gray') +
   geom_smooth(method = 'lm', color = 'black') +
   scale_x_continuous(name = 'RTS Shape (vector ground truth)',
                      limits = c(0, 1)) +
@@ -3556,92 +3689,126 @@ ggplot(polys,
   coord_fixed(expand = FALSE)
 
 # Area
-ggplot(polys,
-       aes(x = rts_area, 
-           y = pred_area)) +
-  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
-  geom_point() +
-  geom_smooth(method = 'lm', color = 'black') +
-  scale_x_continuous(name = 'RTS Area (vector ground truth)') +
-  scale_y_continuous(name = 'Prediction Area (raster prediction)') +
-  facet_grid(. ~ imagery) +
-  coord_fixed()
+ground_pred_area_lm <- linear_reg() %>%
+  fit(
+  pred_area ~ rts_area * imagery,
+  data = polys %>%
+    filter(rts_area <= val_area)
+)
 
-ggplot(polys,
-       aes(x = val_area, 
-           y = pred_area)) +
+tidy(ground_pred_area_lm)
+print('emtrends for ground_pred_area_lm')
+# slope != 0?
+ground_pred_area_labels <- emtrends(
+  ground_pred_area_lm$fit,
+  ~ imagery,
+  var = 'rts_area',
+  infer = c(TRUE, TRUE)
+) %>%
+  as_tibble() %>%
+  mutate(
+    label = case_when(
+      p.value > 0.05 ~ 'n.s.',
+      p.value <= 0.05 ~ assign_conf_stars(p.value)
+    )
+  )
+# slope == 1?
+emtrends(ground_pred_area_lm$fit,
+         ~ imagery,
+         var = 'rts_area',
+         offset = -1,
+         infer = c(TRUE, TRUE))
+
+prediction_area <- ggplot(polys %>%
+         filter(rts_area <= val_area),
+       aes(x = rts_area/10000, 
+           y = pred_area/10000)) +
   geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
-  geom_point() +
+  geom_point(aes(color = 'TRUE')) +
+  geom_point(data = polys %>%
+               filter(rts_area > val_area),
+             aes(color = 'FALSE')) +
+  geom_text(data = ground_pred_area_labels,
+            aes(x = 0, y = 12, label = label),
+            hjust = 0, vjust = 1,
+            nudge_x = 0.5) +
   geom_smooth(method = 'lm', color = 'black') +
-  scale_x_continuous(name = 'Validation Area (raster ground truth)') +
-  scale_y_continuous(name = 'Prediction Area (raster prediction)') +
-  facet_grid(. ~ imagery) +
-  coord_fixed()
+  scale_x_continuous(name = 'Ground Truth Area (ha)',
+                     limits = c(0, 12.5)) +
+  scale_y_continuous(name = 'Prediction Area (ha)',
+                     limits = c(0, 12.5)) +
+  scale_color_manual(name = 'RTS Contained\nFully Within Tile',
+                     values = c('gray', 'black')) +
+  facet_grid('Area' ~ imagery)
 
 # Shape
-prediction_shape <- ggplot(polys,
-       aes(x = rts_shape, 
-           y = pred_shape_corr)) + # use lm to correct for expected shape difference due to data type
+ground_pred_shape_lm <- linear_reg() %>%
+  fit(
+  pred_shape_corr ~ rts_shape * imagery,
+  data = polys %>%
+    filter(rts_area <= val_area)
+)
+
+tidy(ground_pred_shape_lm)
+print('emtrends for ground_pred_shape_lm')
+ground_pred_shape_labels <- emtrends(
+  ground_pred_shape_lm$fit,
+  ~ imagery,
+  var = 'rts_shape',
+  infer = c(TRUE, TRUE)
+) %>%
+  as_tibble() %>%
+  mutate(
+    label = case_when(
+      p.value > 0.05 ~ 'n.s.',
+      p.value <= 0.05 ~ assign_conf_stars(p.value)
+    )
+  )
+emtrends(ground_pred_shape_lm$fit,
+         ~ imagery,
+         var = 'rts_shape',
+         offset = -1,
+         infer = c(TRUE, TRUE))
+
+prediction_shape <- ggplot(
+  polys %>%
+    filter(rts_area <= val_area),
+  aes(x = rts_shape, 
+      y = pred_shape_corr)
+  ) + # use lm to correct for expected shape difference due to data type
   geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
-  geom_point() +
+  geom_point(aes(color = 'TRUE')) +
+  geom_point(data = polys %>%
+               filter(rts_area > val_area),
+             aes(color = 'FALSE')) +
   geom_smooth(method = 'lm', color = 'black') +
-  scale_x_continuous(name = 'RTS Shape',
+  geom_text(data = ground_pred_shape_labels,
+            aes(x = 0, y = 1, label = label),
+            hjust = 0, vjust = 1,
+            nudge_x = 0.02, nudge_y = -0.02) +
+  scale_x_continuous(name = 'Ground Truth Shape',
                      limits = c(0, 1)) +
   scale_y_continuous(name = 'Prediction Shape ',
                      limits = c(0, 1)) +
-  facet_grid(. ~ imagery) +
-  # coord_fixed(expand = FALSE) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+  scale_color_manual(name = 'RTS Contained\nFully Within Tile',
+                     values = c('gray', 'black')) +
+  facet_grid('Shape' ~ imagery) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5),
+        strip.text.x = element_blank(),
+        strip.background.x = element_blank())
 
-# ggsave('./figures/prediction_shape.pdf',
-#        prediction_shape,
-#        height = 3,
+prediction_morphology <- prediction_area/prediction_shape +
+  plot_layout(guides = 'collect')
+prediction_morphology
+
+# ggsave('./figures/prediction_morphology.pdf',
+#        prediction_morphology,
+#        height = 4,
 #        width = 6.5)
-# ggsave('./figures/prediction_shape.jpg',
-#        prediction_shape,
-#        height = 3,
+# ggsave('./figures/prediction_morphology.jpg',
+#        prediction_morphology,
+#        height = 4,
 #        width = 6.5)
-
-ground_pred_shape_lm_1 <- lm(
-  pred_shape_corr ~ rts_shape * imagery,
-  data = polys
-)
-
-summary(ground_pred_shape_lm_1)
-drop1(ground_pred_shape_lm_1)
-emtrends(ground_pred_shape_lm_1,
-        ~ imagery,
-        var = 'rts_shape')
-emtrends(ground_pred_shape_lm_1,
-        ~ imagery,
-        var = 'rts_shape',
-        level = 0.90)
-
-ggplot(polys,
-       aes(x = val_shape, 
-           y = pred_shape)) +
-  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
-  geom_point() +
-  geom_smooth(method = 'lm', color = 'black') +
-  scale_x_continuous(name = 'Validation Shape (raster ground truth)',
-                     limits = c(0, 1)) +
-  scale_y_continuous(name = 'Prediction Shape (raster prediction)',
-                     limits = c(0, 1)) +
-  facet_grid(. ~ imagery) +
-  coord_fixed(expand = FALSE) +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
-
-ground_pred_shape_lm_2 <- lm(pred_shape ~ val_shape * imagery,
-                             data = polys)
-summary(ground_pred_shape_lm_2)
-drop1(ground_pred_shape_lm_2)
-emtrends(ground_pred_shape_lm_2,
-        ~ imagery,
-        var = 'val_shape')
-emtrends(ground_pred_shape_lm_2,
-        ~ imagery,
-        var = 'val_shape',
-        level = 0.90)
 ```
 
 ```{r, fig.width = 6.5, fig.height = 6}
