@@ -428,71 +428,81 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
     filter(imagery == imagery_type)
   
   vector <- vector_data %>%
-               filter(imagery == imagery_type)
+    filter(imagery == imagery_type)
   label <- paste('RTS IoU:', round(vector$rts_iou, 2))
   
   figure <- ggplot(data = vector) +
-      geom_raster(data = rgb,
-                  aes(x = x, y = y, fill = color_hex),
-                  inherit.aes = FALSE) +
-      scale_fill_manual(breaks = levels(input_data$color_hex),
-                        values = levels(input_data$color_hex),
-                        guide = 'none') +
-      geom_sf(aes(geometry = val_geometry,
-                  color = 'Validation',
-                  linewidth = 'Validation'),
-              fill = 'transparent') +
-      scale_color_manual(name = '',
-                         values = c('gray70'),
-                         guide = guide_legend(order = 4)) +
-      scale_linewidth_manual(name = '',
-                             values = c(0.25),
-                             guide = guide_legend(order = 4)) +
-      new_scale('color') +
-      new_scale('linewidth') +
-      geom_sf(aes(geometry = rts_geometry,
-                  color = 'Feature of\nInterest',
-                  linewidth = 'Feature of\nInterest'),
-              fill = 'transparent') +
-      scale_color_manual(name = '',
-                         values = c('gray90'),
-                         drop = FALSE,
-                         guide = guide_legend(order = 2)) +
-      scale_linewidth_manual(name = '',
-                             values = c(0.5),
-                             guide = guide_legend(order = 2)) +
-      new_scale('color') +
-      new_scale('linewidth') +
-      geom_sf(aes(geometry = mask_geometry,
-                  color = 'Mask',
-                  linewidth = 'Mask',
-                  linetype = 'Mask'),
-              fill = 'transparent') +
-      scale_color_manual(name = '',
-                         values = 'gray90',
-                         drop = FALSE,
-                         guide = guide_legend(order = 3)) +
-      scale_linewidth_manual(name = '',
-                             values = c(0.25),
-                             guide = guide_legend(order = 3)) +
-      scale_linetype_manual(name = '',
-                            values = c('dashed'),
-                            guide = guide_legend(order = 3)) +
-      new_scale('color') +
-      geom_sf(aes(geometry = pred_geometry,
-                  color = pq_ci),
-              fill = 'transparent',
-              linewidth = 0.5) +
-      scale_color_manual(name = 'Prediction\n(Quality)',
-                         breaks = pq_labels,
-                         labels = pq_labels,
-                         values = pq_colors,
-                         drop = FALSE,
-                         guide = guide_legend(order = 1, nrow = 3)) +
-    geom_label(x = dims$x_min + 110, 
-               y = dims$y_min + 20, 
-               label = label, 
+    geom_raster(data = rgb,
+                aes(x = x, y = y, fill = color_hex),
+                inherit.aes = FALSE) +
+    scale_fill_manual(breaks = levels(input_data$color_hex),
+                      values = levels(input_data$color_hex),
+                      guide = 'none') +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation',
+                linewidth = 'Validation'),
+            fill = 'transparent') +
+    scale_color_manual(name = '',
+                       values = c('gray70'),
+                       guide = guide_legend(order = 4)
+                       ) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.25),
+                           guide = guide_legend(order = 4)
+                           ) +
+    new_scale('color') +
+    new_scale('linewidth') +
+    geom_sf(aes(geometry = rts_geometry,
+                color = 'Feature of\nInterest',
+                linewidth = 'Feature of\nInterest'),
+            fill = 'transparent') +
+    scale_color_manual(name = '',
+                       values = c('gray90'),
+                       drop = FALSE,
+                       guide = guide_legend(order = 2)
+                       ) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.5),
+                           guide = guide_legend(order = 2)
+                           ) +
+    new_scale('color') +
+    new_scale('linewidth') +
+    geom_sf(aes(geometry = mask_geometry,
+                color = 'Mask',
+                linewidth = 'Mask',
+                linetype = 'Mask'),
+            fill = 'transparent') +
+    scale_color_manual(name = '',
+                       values = 'gray90',
+                       drop = FALSE,
+                       guide = guide_legend(order = 3)
+                       ) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.25),
+                           guide = guide_legend(order = 3)
+                           ) +
+    scale_linetype_manual(name = '',
+                          values = c('dashed'),
+                          guide = guide_legend(order = 3)
+                          ) +
+    new_scale('color') +
+    geom_sf(aes(geometry = pred_geometry,
+                color = pq_ci),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = 'Prediction\n(Quality)',
+                       breaks = pq_labels,
+                       labels = pq_labels,
+                       values = pq_colors,
+                       drop = FALSE,
+                       guide = guide_legend(order = 1, nrow = 3)
+                       ) +
+    geom_label(x = dims$x_min,
+               y = dims$y_min,
+               label = label,
                size = 2.5,
+               hjust = 0,
+               vjust = 0,
                label.padding = unit(0.1, 'lines'),
                label.r = unit(0, 'lines'),
                label.size = unit(0, 'lines')) +
@@ -500,7 +510,6 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
     coord_sf(xlim = c(dims$x_min, dims$x_max),
              ylim = c(dims$y_min, dims$y_max),
              expand = FALSE) +
-    # theme_few() +
     theme(axis.title = element_blank(),
           axis.text = element_blank(),
           axis.ticks = element_blank(),
@@ -1705,6 +1714,28 @@ iou <- polys %>%
             .by = 'imagery') %>%
   select(Imagery = imagery, `RTS IoU` = rts_iou, `RTS IoU (remove zeros)` = rts_iou_v2, `Val IoU` = mean_iou, `Val IoU (remove zeros)` = mean_iou_v2)
 knitr::kable(iou, caption = 'IoU (Calculated Directly from Predictions)')
+```
+
+### Investigate RTS vs. Background Coverage
+
+```{r, fig.height = 3, fig.width = 3}
+polys <- polys %>%
+  mutate(rts_coverage = as.numeric(st_area(rts_geometry))/as.numeric(st_area(bbox_geometry)))
+
+ggplot(polys %>%
+         filter(imagery == 'WorldView'), 
+       aes(x = rts_coverage)) +
+  geom_histogram(binwidth = 0.05, boundary = 0) +
+  scale_x_continuous(name = 'RTS Coverage of Tile (%)',
+                     labels = ~.x*100) +
+  scale_y_continuous(name = 'Tile Count')
+
+# ggsave('./figures/rts_coverage.pdf',
+#        height = 3, 
+#        width = 3)
+# ggsave('./figures/rts_coverage.jpg',
+#        height = 3, 
+#        width = 3)
 ```
 
 ### Plot
@@ -4453,10 +4484,10 @@ rts_highlights_plot <- (
     facet_grid('Bright RTS' ~ .)
 ) / (
   rts_maps_subset[[4]] +
-    facet_grid('Imagery Matters' ~ .)
+    facet_grid('Bright RTS' ~ .)
 ) / (
   rts_maps_subset[[5]] +
-    facet_grid('Imagery Matters' ~ .)
+    facet_grid('Variable Performance' ~ .)
 ) / (
   rts_maps_subset[[6]] +
     facet_grid('Green RTS' ~ .)
