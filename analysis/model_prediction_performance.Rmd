@@ -4822,3 +4822,127 @@ plots <- map(
 plots
 ```
 
+
+## Planet Processing Examples
+
+```{r}
+pre_mad <- rast('./data/planet/processing_examples/planet_processing_data_yg_val_regions_arosics_output_calibrated_files_0_20170715_062757_102d_3B_AnalyticMS_SR_harmonized_clip_arosics.tiff') %>%
+  project('EPSG:3413')
+post_mad <- rast('./data/planet/processing_examples/planet_processing_data_yg_val_regions_mad_output_calibrated_files_0_20170715_062757_102d_3B_AnalyticMS_SR_harmonized_clip_arosics_mad.tiff') %>%
+  project('EPSG:3413')
+sentinel <- rast('./data/planet/processing_examples/planet_processing_data_yg_val_regions_sentinel_data_Sentinel-2_YG_Validation_mosaic_bgrnir_Region_0_UTM42N.tiff') %>%
+  project('EPSG:3413')
+```
+
+```{r}
+plotRGB(pre_mad, r = 3, g = 2, b = 1, stretch = 'histogram')
+plotRGB(post_mad, r = 3, g = 2, b = 1, stretch = 'histogram')
+plotRGB(sentinel, r = 3, g = 2, b = 1, stretch = 'histogram')
+```
+
+```{r}
+pre_mad_df <- pre_mad %>%
+  as.data.frame(xy = TRUE)
+post_mad_df <- post_mad %>%
+  as.data.frame(xy = TRUE)
+sentinel_df <- sentinel %>%
+  as.data.frame(xy = TRUE)
+```
+
+```{r}
+x_limits <- c(0, 1250)
+y_limits <- c(0, 0.006)
+
+hist_pre <- ggplot(pre_mad_df) +
+  geom_density(aes(x = red),
+               # color = 'red',
+               fill = 'red',
+               alpha = 0.33) +
+  geom_density(aes(x = green),
+               # color = 'red',
+               fill = 'green',
+               alpha = 0.33) +
+  geom_density(aes(x = blue),
+               # color = 'red',
+               fill = 'blue',
+               alpha = 0.33) +
+  scale_x_continuous(name = 'Surface Reflectance',
+                     limits = x_limits,
+                     expand = c(0, 0)) +
+  scale_y_continuous(name = 'Density',
+                     limits = y_limits) +
+  facet_grid('Planet\n(Pre-IRMAD)' ~ .)
+
+hist_post <- ggplot(post_mad_df) +
+  geom_density(aes(x = red),
+               # color = 'red',
+               fill = 'red',
+               alpha = 0.33) +
+  geom_density(aes(x = green),
+               # color = 'red',
+               fill = 'green',
+               alpha = 0.33) +
+  geom_density(aes(x = blue),
+               # color = 'red',
+               fill = 'blue',
+               alpha = 0.33) +
+  scale_x_continuous(name = 'Surface Reflectance',
+                     limits = x_limits,
+                     expand = c(0, 0)) +
+  scale_y_continuous(name = 'Density',
+                     limits = y_limits) +
+  facet_grid('Planet\n(Post-IRMAD)' ~ .)
+
+hist_sent <- ggplot(sentinel_df) +
+  geom_density(aes(x = B4),
+               # color = 'red',
+               fill = 'red',
+               alpha = 0.33) +
+  geom_density(aes(x = B3),
+               # color = 'red',
+               fill = 'green',
+               alpha = 0.33) +
+  geom_density(aes(x = B2),
+               # color = 'red',
+               fill = 'blue',
+               alpha = 0.33) +
+  scale_x_continuous(name = 'Surface Reflectance',
+                     limits = x_limits,
+                     expand = c(0, 0)) +
+  scale_y_continuous(name = 'Density',
+                     limits = y_limits) +
+  facet_grid('Sentinel\nReference' ~ .)
+```
+
+```{r, fig.height = 3, fig.width = 5}
+processing_hist <- (
+  hist_pre +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.title.y = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt"))
+) / (
+  hist_sent +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt"))
+) / (
+  hist_post +
+    theme(axis.title.y = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt"))
+)
+
+processing_hist
+
+# ggsave('./figures/irmad_processing_histogram.pdf',
+#        processing_hist,
+#        height = 3,
+#        width = 5)
+# ggsave('./figures/irmad_processing_histogram.jpg',
+#        processing_hist,
+#        height = 3,
+#        width = 5)
+```
+
