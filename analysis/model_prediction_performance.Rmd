@@ -4826,27 +4826,133 @@ plots
 ## Planet Processing Examples
 
 ```{r}
-pre_mad <- rast('./data/planet/processing_examples/planet_processing_data_yg_val_regions_arosics_output_calibrated_files_0_20170715_062757_102d_3B_AnalyticMS_SR_harmonized_clip_arosics.tiff') %>%
-  project('EPSG:3413')
-post_mad <- rast('./data/planet/processing_examples/planet_processing_data_yg_val_regions_mad_output_calibrated_files_0_20170715_062757_102d_3B_AnalyticMS_SR_harmonized_clip_arosics_mad.tiff') %>%
-  project('EPSG:3413')
-sentinel <- rast('./data/planet/processing_examples/planet_processing_data_yg_val_regions_sentinel_data_Sentinel-2_YG_Validation_mosaic_bgrnir_Region_0_UTM42N.tiff') %>%
-  project('EPSG:3413')
+pre_arosics <- rast('./data/planet/processing_examples/0_20180709_064535_1014_3B_AnalyticMS_SR_harmonized_clip_masked.tiff') %>%
+  project('EPSG:3413') %>%
+  stretch(minv = 0,
+          maxv = 1,
+          smin = 300,
+          smax = 1200)
+RGB(pre_arosics) <- c(1, 2, 3)
+
+pre_mad <- rast('./data/planet/processing_examples/0_20180709_064535_1014_3B_AnalyticMS_SR_harmonized_clip_arosics.tif') %>%
+  project('EPSG:3413') %>%
+  stretch(minv = 0,
+          maxv = 1,
+          smin = 300,
+          smax = 1200)
+RGB(pre_mad) <- c(1, 2, 3)
+
+post_mad <- rast('./data/planet/processing_examples/0_20180709_064535_1014_3B_AnalyticMS_SR_harmonized_clip_arosics_mad.tif') %>%
+  project('EPSG:3413') %>%
+  stretch(minv = 0,
+          maxv = 1,
+          smin = 300,
+          smax = 1200)
+RGB(post_mad) <- c(1, 2, 3)
+
+sentinel <- rast('./data/planet/processing_examples/Sentinel-2_YG_Validation_mosaic_bgrnir_Region_0_UTM42N.tiff') %>%
+  project(pre_mad) %>%
+  stretch(minv = 0,
+          maxv = 1,
+          smin = 300,
+          smax = 1200)
+RGB(sentinel) <- c(1, 2, 3)
+sentinel_crop <- sentinel %>%
+  crop(pre_mad, mask = TRUE)
 ```
 
 ```{r}
-plotRGB(pre_mad, r = 3, g = 2, b = 1, stretch = 'histogram')
-plotRGB(post_mad, r = 3, g = 2, b = 1, stretch = 'histogram')
-plotRGB(sentinel, r = 3, g = 2, b = 1, stretch = 'histogram')
-```
+pre_arosics_df <- pre_arosics %>%
+  as.data.frame(xy = TRUE) %>%
+  rename(r = 5, g = 4, b = 3) %>%
+  filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
+  mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)))
 
-```{r}
 pre_mad_df <- pre_mad %>%
-  as.data.frame(xy = TRUE)
+  as.data.frame(xy = TRUE) %>%
+  rename(r = 5, g = 4, b = 3) %>%
+  filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
+  mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)))
+
 post_mad_df <- post_mad %>%
-  as.data.frame(xy = TRUE)
+  as.data.frame(xy = TRUE) %>%
+  rename(r = 5, g = 4, b = 3) %>%
+  filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
+  mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)))
+
 sentinel_df <- sentinel %>%
-  as.data.frame(xy = TRUE)
+  as.data.frame(xy = TRUE) %>%
+  rename(r = 5, g = 4, b = 3) %>%
+  filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
+  mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)))
+```
+
+```{r}
+sentinel_map <- ggplot() +
+  geom_raster(data = sentinel_df,
+              aes(x = x, y = y, fill = color.hex)) +
+  scale_fill_manual(values = levels(sentinel_df$color.hex),
+                    guide = FALSE) +
+  scale_x_continuous(name = 'Longitude',
+                     limits = c(1932000, 1942500)) +
+  scale_y_continuous(name = "Latitude",
+                     limits = c(818500, 827500)) +
+  coord_fixed(expand = FALSE)
+
+pre_arosics_map <- ggplot() +
+  geom_raster(data = sentinel_df,
+              aes(x = x, y = y, fill = color.hex)) +
+  scale_fill_manual(values = levels(sentinel_df$color.hex),
+                    guide = FALSE) +
+  new_scale_fill() +
+  geom_raster(data = pre_arosics_df,
+              aes(x = x, y = y, fill = color.hex)) +
+  scale_fill_manual(values = levels(pre_arosics_df$color.hex),
+                    guide = FALSE) +
+  scale_x_continuous(name = 'Longitude',
+                     limits = c(1932000, 1942500)) +
+  scale_y_continuous(name = "Latitude",
+                     limits = c(818500, 827500)) +
+  coord_fixed(expand = FALSE)
+
+pre_mad_map <- ggplot() +
+  geom_raster(data = sentinel_df,
+              aes(x = x, y = y, fill = color.hex)) +
+  scale_fill_manual(values = levels(sentinel_df$color.hex),
+                    guide = FALSE) +
+  new_scale_fill() +
+  geom_raster(data = pre_mad_df,
+              aes(x = x, y = y, fill = color.hex)) +
+  scale_fill_manual(values = levels(pre_mad_df$color.hex),
+                    guide = FALSE) +
+  scale_x_continuous(name = 'Longitude',
+                     limits = c(1932000, 1942500)) +
+  scale_y_continuous(name = "Latitude",
+                     limits = c(818500, 827500)) +
+  coord_fixed(expand = FALSE)
+
+post_mad_map <- ggplot() +
+  geom_raster(data = sentinel_df,
+              aes(x = x, y = y, fill = color.hex)) +
+  scale_fill_manual(values = levels(sentinel_df$color.hex),
+                    guide = FALSE) +
+  new_scale_fill() +
+  geom_raster(data = post_mad_df,
+              aes(x = x, y = y, fill = color.hex)) +
+  scale_fill_manual(values = levels(post_mad_df$color.hex),
+                    guide = FALSE) +
+  scale_x_continuous(name = 'Longitude',
+                     limits = c(1932000, 1942500)) +
+  scale_y_continuous(name = "Latitude",
+                     limits = c(818500, 827500)) +
+  coord_fixed(expand = FALSE)
+```
+
+```{r}
+sentinel_map
+pre_arosics_map
+pre_mad_map
+post_mad_map
 ```
 
 ```{r}
