@@ -774,7 +774,7 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
       # outlier.shape = NA
       ) +
     geom_signif(data = contrasts %>%
-                  filter(variable == y_var & rts_class == 'RTS'),
+                  filter(p_value <= 0.1 & variable == y_var & rts_class == 'RTS'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
                     annotation = star_label, group = contrast),
                 stat="identity",
@@ -802,7 +802,7 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
       # outlier.shape = NA
       ) +
     geom_signif(data = contrasts %>%
-                  filter(variable == y_var & rts_class == 'Delta'),
+                  filter(p_value <= 0.1 & variable == y_var & rts_class == 'Delta'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
                     annotation = star_label, group = contrast),
                 stat="identity",
@@ -830,7 +830,7 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
       # outlier.shape = NA
       ) +
     geom_signif(data = contrasts %>%
-                  filter(variable == y_var & rts_class == 'Background'),
+                  filter(p_value <= 0.1 &variable == y_var & rts_class == 'Background'),
                 aes(x = x_min, y = y, xend = x_max, yend = y,
                     annotation = star_label, group = contrast),
                 stat="identity",
@@ -2643,7 +2643,6 @@ zonal_stats_contrasts <- lm_output %>%
   select(imagery, rts_class, variable, contrasts_pq) %>%
   unnest(cols = c(contrasts_pq)) %>%
   ungroup() %>%
-  filter(p_value <= 0.1) %>%
   separate_wider_delim(contrast, 
                        delim = ' - ', 
                        names = c('x_min', 'x_max'), 
@@ -4827,35 +4826,19 @@ plots
 
 ```{r}
 pre_arosics <- rast('./data/planet/processing_examples/0_20180709_064535_1014_3B_AnalyticMS_SR_harmonized_clip_masked.tiff') %>%
-  project('EPSG:3413') %>%
-  stretch(minv = 0,
-          maxv = 1,
-          smin = 300,
-          smax = 1200)
+  project('EPSG:3413')
 RGB(pre_arosics) <- c(1, 2, 3)
 
 pre_mad <- rast('./data/planet/processing_examples/0_20180709_064535_1014_3B_AnalyticMS_SR_harmonized_clip_arosics.tif') %>%
-  project('EPSG:3413') %>%
-  stretch(minv = 0,
-          maxv = 1,
-          smin = 300,
-          smax = 1200)
+  project('EPSG:3413')
 RGB(pre_mad) <- c(1, 2, 3)
 
 post_mad <- rast('./data/planet/processing_examples/0_20180709_064535_1014_3B_AnalyticMS_SR_harmonized_clip_arosics_mad.tif') %>%
-  project('EPSG:3413') %>%
-  stretch(minv = 0,
-          maxv = 1,
-          smin = 300,
-          smax = 1200)
+  project('EPSG:3413')
 RGB(post_mad) <- c(1, 2, 3)
 
 sentinel <- rast('./data/planet/processing_examples/Sentinel-2_YG_Validation_mosaic_bgrnir_Region_0_UTM42N.tiff') %>%
-  project(pre_mad) %>%
-  stretch(minv = 0,
-          maxv = 1,
-          smin = 300,
-          smax = 1200)
+  project(pre_mad)
 RGB(sentinel) <- c(1, 2, 3)
 sentinel_crop <- sentinel %>%
   crop(pre_mad, mask = TRUE)
@@ -4865,38 +4848,102 @@ sentinel_crop <- sentinel %>%
 pre_arosics_df <- pre_arosics %>%
   as.data.frame(xy = TRUE) %>%
   rename(r = 5, g = 4, b = 3) %>%
-  filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
-  mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)))
+  full_join(pre_arosics %>%
+              stretch(minv = 0,
+                      maxv = 1,
+                      smin = 300,
+                      smax = 1200) %>%
+              as.data.frame(xy = TRUE) %>%
+              rename(r_lin = 5, g_lin = 4, b_lin = 3) %>%
+              select(-nir),
+            by = c('x', 'y')) %>%
+  mutate(
+    color.hex = factor(
+      case_when(
+        !is.na(r_lin) & !is.na(g_lin) & !is.na(b_lin) ~ rgb(r_lin, g_lin, b_lin, maxColorValue = 1),
+        TRUE ~ NA
+      )
+    )
+  )
 
 pre_mad_df <- pre_mad %>%
   as.data.frame(xy = TRUE) %>%
   rename(r = 5, g = 4, b = 3) %>%
-  filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
-  mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)))
+  full_join(pre_mad %>%
+              stretch(minv = 0,
+                      maxv = 1,
+                      smin = 300,
+                      smax = 1200) %>%
+              as.data.frame(xy = TRUE) %>%
+              rename(r_lin = 5, g_lin = 4, b_lin = 3) %>%
+              select(-nir),
+            by = c('x', 'y')) %>%
+  mutate(
+    color.hex = factor(
+      case_when(
+        !is.na(r_lin) & !is.na(g_lin) & !is.na(b_lin) ~ rgb(r_lin, g_lin, b_lin, maxColorValue = 1),
+        TRUE ~ NA
+      )
+    )
+  )
 
 post_mad_df <- post_mad %>%
   as.data.frame(xy = TRUE) %>%
   rename(r = 5, g = 4, b = 3) %>%
-  filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
-  mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)))
+  full_join(post_mad %>%
+              stretch(minv = 0,
+                      maxv = 1,
+                      smin = 300,
+                      smax = 1200) %>%
+              as.data.frame(xy = TRUE) %>%
+              rename(r_lin = 5, g_lin = 4, b_lin = 3) %>%
+              select(-nir),
+            by = c('x', 'y')) %>%
+  mutate(
+    color.hex = factor(
+      case_when(
+        !is.na(r_lin) & !is.na(g_lin) & !is.na(b_lin) ~ rgb(r_lin, g_lin, b_lin, maxColorValue = 1),
+        TRUE ~ NA
+      )
+    )
+  )
 
 sentinel_df <- sentinel %>%
   as.data.frame(xy = TRUE) %>%
   rename(r = 5, g = 4, b = 3) %>%
-  filter(!(is.na(r) | is.na(g) | is.na(b))) %>%
-  mutate(color.hex = factor(rgb(r, g, b, maxColorValue = 1)))
+  full_join(sentinel %>%
+              stretch(minv = 0,
+                      maxv = 1,
+                      smin = 300,
+                      smax = 1200) %>%
+              as.data.frame(xy = TRUE) %>%
+              rename(r_lin = 5, g_lin = 4, b_lin = 3),
+            by = c('x', 'y')) %>%
+  mutate(
+    color.hex = factor(
+      case_when(
+        !is.na(r_lin) & !is.na(g_lin) & !is.na(b_lin) ~ rgb(r_lin, g_lin, b_lin, maxColorValue = 1),
+        TRUE ~ NA
+      )
+    )
+  )
 ```
 
 ```{r}
+# x_limits <- c(1932000, 1942500)
+# y_limits <- c(818500, 827500)
+x_limits <- c(1940250, 1940550)
+y_limits <- c(821500, 821800)
+
 sentinel_map <- ggplot() +
   geom_raster(data = sentinel_df,
               aes(x = x, y = y, fill = color.hex)) +
   scale_fill_manual(values = levels(sentinel_df$color.hex),
                     guide = FALSE) +
   scale_x_continuous(name = 'Longitude',
-                     limits = c(1932000, 1942500)) +
+                     limits = x_limits) +
   scale_y_continuous(name = "Latitude",
-                     limits = c(818500, 827500)) +
+                     limits = y_limits) +
   coord_fixed(expand = FALSE)
 
 pre_arosics_map <- ggplot() +
@@ -4910,9 +4957,9 @@ pre_arosics_map <- ggplot() +
   scale_fill_manual(values = levels(pre_arosics_df$color.hex),
                     guide = FALSE) +
   scale_x_continuous(name = 'Longitude',
-                     limits = c(1932000, 1942500)) +
+                     limits = x_limits) +
   scale_y_continuous(name = "Latitude",
-                     limits = c(818500, 827500)) +
+                     limits = y_limits) +
   coord_fixed(expand = FALSE)
 
 pre_mad_map <- ggplot() +
@@ -4926,9 +4973,9 @@ pre_mad_map <- ggplot() +
   scale_fill_manual(values = levels(pre_mad_df$color.hex),
                     guide = FALSE) +
   scale_x_continuous(name = 'Longitude',
-                     limits = c(1932000, 1942500)) +
+                     limits = x_limits) +
   scale_y_continuous(name = "Latitude",
-                     limits = c(818500, 827500)) +
+                     limits = y_limits) +
   coord_fixed(expand = FALSE)
 
 post_mad_map <- ggplot() +
@@ -4942,19 +4989,41 @@ post_mad_map <- ggplot() +
   scale_fill_manual(values = levels(post_mad_df$color.hex),
                     guide = FALSE) +
   scale_x_continuous(name = 'Longitude',
-                     limits = c(1932000, 1942500)) +
+                     limits = x_limits) +
   scale_y_continuous(name = "Latitude",
-                     limits = c(818500, 827500)) +
+                     limits = y_limits) +
   coord_fixed(expand = FALSE)
 ```
 
-```{r}
-sentinel_map
-pre_arosics_map
-pre_mad_map
-post_mad_map
+```{r, plot.height = 5.75, plot.width = 6.5}
+(
+  (
+    sentinel_map +
+      theme(axis.title.x = element_blank(),
+            axis.text.x = element_blank())
+  ) | (
+    pre_arosics_map +
+      theme(axis.title = element_blank(),
+            axis.text = element_blank())
+  )
+) / (
+  (
+    post_mad_map +
+      theme()
+  ) | (
+    pre_mad_map +
+      theme(axis.title.y = element_blank(),
+            axis.text.y = element_blank())
+  )
+) +
+  plot_annotation(tag_levels = list(c('a. Sentinel-2 (Reference)', 
+                                      'b. Raw PlanetScope',  
+                                      'c. PlanetScope (AROSICS + IRMAD)', 
+                                      'd. PlanetScope (AROSICS)'))) &
+  theme(plot.tag.position = c(0, 1),
+        plot.tag = element_text(size = 12, hjust = 0, vjust = -0.3))
 ```
-
+      
 ```{r}
 x_limits <- c(0, 1250)
 y_limits <- c(0, 0.006)
