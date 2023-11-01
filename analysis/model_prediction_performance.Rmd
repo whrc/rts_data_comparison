@@ -2717,7 +2717,8 @@ zonal_stats_figs <- map(
   ~ plot_zonal_stats(
     x_var = 'pq_ci',
     y_var = .x, 
-    contrasts = zonal_stats_contrasts,
+    contrasts = zonal_stats_contrasts %>%
+      filter(p_value <= 0.1),
     limits = zonal_stats_limits)
 )
 names(zonal_stats_figs) <- variables
@@ -2745,7 +2746,7 @@ lum_delta_fig <- ggplot(
   ) +
   geom_signif(
     data = zonal_stats_contrasts %>%
-      filter(variable == 'lum_mean' & rts_class == 'Delta'),
+      filter(p_value <= 0.1 & variable == 'lum_mean' & rts_class == 'Delta'),
     aes(x = x_min, y = y, xend = x_max, yend = y,
         annotation = star_label, group = contrast),
     stat="identity",
@@ -2776,7 +2777,7 @@ r_delta_fig <- ggplot(
   ) +
   geom_signif(
     data = zonal_stats_contrasts %>%
-      filter(variable == 'r_mean' & rts_class == 'Delta'),
+      filter(p_value <= 0.1 & variable == 'r_mean' & rts_class == 'Delta'),
     aes(x = x_min, y = y, xend = x_max, yend = y,
         annotation = star_label, group = contrast),
     stat="identity",
@@ -2806,7 +2807,7 @@ g_delta_fig <- ggplot(
   ) +
   geom_signif(
     data = zonal_stats_contrasts %>%
-      filter(variable == 'g_mean' & rts_class == 'Delta'),
+      filter(p_value <= 0.1 & variable == 'g_mean' & rts_class == 'Delta'),
     aes(x = x_min, y = y, xend = x_max, yend = y,
         annotation = star_label, group = contrast),
     stat="identity",
@@ -2836,7 +2837,7 @@ b_delta_fig <- ggplot(
   ) +
   geom_signif(
     data = zonal_stats_contrasts %>%
-      filter(variable == 'b_mean' & rts_class == 'Delta'),
+      filter(p_value <= 0.1 & variable == 'b_mean' & rts_class == 'Delta'),
     aes(x = x_min, y = y, xend = x_max, yend = y,
         annotation = star_label, group = contrast),
     stat="identity",
