@@ -8,7 +8,7 @@ output:
 
 ## TODO:
 
-- decide whether to add undetected RTS category to pq_ci
+- makes maps of predictions on top of non-RGB layers
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -813,7 +813,7 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
     scale_y_continuous(eval(parse(text = predictor_name))) +
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
-    facet_grid(rts_class ~ imagery) +
+    facet_grid("Delta ~ '(RTS - BG)'" ~ imagery, labeller = label_parsed) +
     theme(axis.title.x = element_blank(),
           plot.margin = margin(0, 0, 0, 0, "pt")) +
     coord_cartesian(ylim = limits %>%
