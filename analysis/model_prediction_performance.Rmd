@@ -5032,7 +5032,7 @@ post_mad_map <- ggplot() +
 ```
 
 ```{r, fig.height = 6.75, fig.width = 6.5}
-(
+planet_processing_map <- (
   (
     sentinel_map +
       theme(axis.title = element_blank(),
@@ -5046,13 +5046,13 @@ post_mad_map <- ggplot() +
   )
 ) / (
   (
-    post_mad_map +
+    pre_mad_map +
       theme(axis.title = element_blank(),
             axis.text = element_blank(),
             axis.ticks = element_blank()) +
-  annotation_scale(location = 'bl')
+      annotation_scale(location = 'bl')
   ) | (
-    pre_mad_map +
+    post_mad_map +
       theme(axis.title = element_blank(),
             axis.text = element_blank(),
             axis.ticks = element_blank())
@@ -5060,10 +5060,21 @@ post_mad_map <- ggplot() +
 ) +
   plot_annotation(tag_levels = list(c('a. Sentinel-2 (Reference)', 
                                       'b. Raw PlanetScope',  
-                                      'c. PlanetScope (AROSICS + IRMAD)', 
-                                      'd. PlanetScope (AROSICS)'))) &
+                                      'c. PlanetScope (AROSICS)', 
+                                      'd. PlanetScope (AROSICS + IRMAD)'))) &
   theme(plot.tag.position = c(0, 1),
         plot.tag = element_text(size = 12, hjust = 0, vjust = -0.4))
+
+planet_processing_map
+
+# ggsave('./figures/planet_processing_map.pdf',
+#        planet_processing_map,
+#        height = 6.75,
+#        width = 6.5)
+# ggsave('./figures/planet_processing_map.jpg',
+#        planet_processing_map,
+#        height = 6.75,
+#        width = 6.5)
 ```
       
 ```{r}
@@ -5128,7 +5139,7 @@ hist_sent <- ggplot(sentinel_df) +
                      expand = c(0, 0)) +
   scale_y_continuous(name = 'Density',
                      limits = y_limits) +
-  facet_grid('Sentinel\nReference' ~ .)
+  facet_grid('Sentinel-2\nReference' ~ .)
 ```
 
 ```{r, fig.height = 3, fig.width = 5}
