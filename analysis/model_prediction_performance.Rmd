@@ -38,6 +38,7 @@ library(ggsignif)
 library(ggfortify)
 library(plotly)
 library(ggthemes)
+library(ggspatial)
 library(tidyverse)
 theme_set(theme_bw())
 ```
@@ -4917,7 +4918,8 @@ sentinel_df <- sentinel %>%
                       smin = 300,
                       smax = 1200) %>%
               as.data.frame(xy = TRUE) %>%
-              rename(r_lin = 5, g_lin = 4, b_lin = 3),
+              rename(r_lin = 5, g_lin = 4, b_lin = 3) %>%
+              select(-B8),
             by = c('x', 'y')) %>%
   mutate(
     color.hex = factor(
@@ -4934,86 +4936,126 @@ sentinel_df <- sentinel %>%
 # y_limits <- c(818500, 827500)
 x_limits <- c(1940250, 1940550)
 y_limits <- c(821500, 821800)
+limits <- sentinel_df %>% 
+  slice(
+    map2_int(x_limits,
+             y_limits, 
+             ~ which(
+               sqrt((sentinel_df$x - .x)^2 + (sentinel_df$y - .y)^2) == min(sqrt((sentinel_df$x - .x)^2 + (sentinel_df$y - .y)^2))
+             )
+    )
+  ) %>% 
+  select(x, y)
+
+sentinel_df_clean <- sentinel_df %>%
+  filter(between(x, min(limits$x), max(limits$x)) & 
+           between(y, min(limits$y), max(limits$y)) & 
+           !is.na(color.hex)) %>%
+  mutate(color.hex = factor(as.character(color.hex)))
+
+pre_arosics_df_clean <- pre_arosics_df %>%
+  filter(between(x, min(limits$x), max(limits$x)) & 
+           between(y, min(limits$y), max(limits$y)) & 
+           !is.na(color.hex)) %>%
+  mutate(color.hex = factor(as.character(color.hex)))
+
+pre_mad_df_clean <- pre_mad_df %>%
+  filter(between(x, min(limits$x), max(limits$x)) & 
+           between(y, min(limits$y), max(limits$y)) & 
+           !is.na(color.hex)) %>%
+  mutate(color.hex = factor(as.character(color.hex)))
+
+post_mad_df_clean <- post_mad_df %>%
+  filter(between(x, min(limits$x), max(limits$x)) & 
+           between(y, min(limits$y), max(limits$y)) & 
+           !is.na(color.hex)) %>%
+  mutate(color.hex = factor(as.character(color.hex)))
 
 sentinel_map <- ggplot() +
-  geom_raster(data = sentinel_df,
+  geom_raster(data = sentinel_df_clean,
               aes(x = x, y = y, fill = color.hex)) +
-  scale_fill_manual(values = levels(sentinel_df$color.hex),
+  scale_fill_manual(values = levels(sentinel_df_clean$color.hex),
                     guide = FALSE) +
   scale_x_continuous(name = 'Longitude',
-                     limits = x_limits) +
+                     limits = limits$x) +
   scale_y_continuous(name = "Latitude",
-                     limits = y_limits) +
+                     limits = limits$y) +
   coord_fixed(expand = FALSE)
 
 pre_arosics_map <- ggplot() +
-  geom_raster(data = sentinel_df,
+  # geom_raster(data = sentinel_df,
+  #             aes(x = x, y = y, fill = color.hex)) +
+  # scale_fill_manual(values = levels(sentinel_df$color.hex),
+  #                   guide = FALSE) +
+  # new_scale_fill() +
+  geom_raster(data = pre_arosics_df_clean,
               aes(x = x, y = y, fill = color.hex)) +
-  scale_fill_manual(values = levels(sentinel_df$color.hex),
-                    guide = FALSE) +
-  new_scale_fill() +
-  geom_raster(data = pre_arosics_df,
-              aes(x = x, y = y, fill = color.hex)) +
-  scale_fill_manual(values = levels(pre_arosics_df$color.hex),
+  scale_fill_manual(values = levels(pre_arosics_df_clean$color.hex),
                     guide = FALSE) +
   scale_x_continuous(name = 'Longitude',
-                     limits = x_limits) +
+                     limits = limits$x) +
   scale_y_continuous(name = "Latitude",
-                     limits = y_limits) +
+                     limits = limits$y) +
   coord_fixed(expand = FALSE)
 
 pre_mad_map <- ggplot() +
-  geom_raster(data = sentinel_df,
+  # geom_raster(data = sentinel_df,
+  #             aes(x = x, y = y, fill = color.hex)) +
+  # scale_fill_manual(values = levels(sentinel_df$color.hex),
+  #                   guide = FALSE) +
+  # new_scale_fill() +
+  geom_raster(data = pre_mad_df_clean,
               aes(x = x, y = y, fill = color.hex)) +
-  scale_fill_manual(values = levels(sentinel_df$color.hex),
-                    guide = FALSE) +
-  new_scale_fill() +
-  geom_raster(data = pre_mad_df,
-              aes(x = x, y = y, fill = color.hex)) +
-  scale_fill_manual(values = levels(pre_mad_df$color.hex),
+  scale_fill_manual(values = levels(pre_mad_df_clean$color.hex),
                     guide = FALSE) +
   scale_x_continuous(name = 'Longitude',
-                     limits = x_limits) +
+                     limits = limits$x) +
   scale_y_continuous(name = "Latitude",
-                     limits = y_limits) +
+                     limits = limits$y) +
   coord_fixed(expand = FALSE)
 
 post_mad_map <- ggplot() +
-  geom_raster(data = sentinel_df,
+  # geom_raster(data = sentinel_df,
+  #             aes(x = x, y = y, fill = color.hex)) +
+  # scale_fill_manual(values = levels(sentinel_df$color.hex),
+  #                   guide = FALSE) +
+  # new_scale_fill() +
+  geom_raster(data = post_mad_df_clean,
               aes(x = x, y = y, fill = color.hex)) +
-  scale_fill_manual(values = levels(sentinel_df$color.hex),
-                    guide = FALSE) +
-  new_scale_fill() +
-  geom_raster(data = post_mad_df,
-              aes(x = x, y = y, fill = color.hex)) +
-  scale_fill_manual(values = levels(post_mad_df$color.hex),
+  scale_fill_manual(values = levels(post_mad_df_clean$color.hex),
                     guide = FALSE) +
   scale_x_continuous(name = 'Longitude',
-                     limits = x_limits) +
+                     limits = limits$x) +
   scale_y_continuous(name = "Latitude",
-                     limits = y_limits) +
+                     limits = limits$y) +
   coord_fixed(expand = FALSE)
 ```
 
-```{r, plot.height = 5.75, plot.width = 6.5}
+```{r, fig.height = 6.75, fig.width = 6.5}
 (
   (
     sentinel_map +
-      theme(axis.title.x = element_blank(),
-            axis.text.x = element_blank())
+      theme(axis.title = element_blank(),
+            axis.text = element_blank(),
+            axis.ticks = element_blank())
   ) | (
     pre_arosics_map +
       theme(axis.title = element_blank(),
-            axis.text = element_blank())
+            axis.text = element_blank(),
+            axis.ticks = element_blank())
   )
 ) / (
   (
     post_mad_map +
-      theme()
+      theme(axis.title = element_blank(),
+            axis.text = element_blank(),
+            axis.ticks = element_blank()) +
+  annotation_scale(location = 'bl')
   ) | (
     pre_mad_map +
-      theme(axis.title.y = element_blank(),
-            axis.text.y = element_blank())
+      theme(axis.title = element_blank(),
+            axis.text = element_blank(),
+            axis.ticks = element_blank())
   )
 ) +
   plot_annotation(tag_levels = list(c('a. Sentinel-2 (Reference)', 
@@ -5021,7 +5063,7 @@ post_mad_map <- ggplot() +
                                       'c. PlanetScope (AROSICS + IRMAD)', 
                                       'd. PlanetScope (AROSICS)'))) &
   theme(plot.tag.position = c(0, 1),
-        plot.tag = element_text(size = 12, hjust = 0, vjust = -0.3))
+        plot.tag = element_text(size = 12, hjust = 0, vjust = -0.4))
 ```
       
 ```{r}
@@ -5029,15 +5071,15 @@ x_limits <- c(0, 1250)
 y_limits <- c(0, 0.006)
 
 hist_pre <- ggplot(pre_mad_df) +
-  geom_density(aes(x = red),
+  geom_density(aes(x = r),
                # color = 'red',
                fill = 'red',
                alpha = 0.33) +
-  geom_density(aes(x = green),
+  geom_density(aes(x = g),
                # color = 'red',
                fill = 'green',
                alpha = 0.33) +
-  geom_density(aes(x = blue),
+  geom_density(aes(x = b),
                # color = 'red',
                fill = 'blue',
                alpha = 0.33) +
@@ -5049,15 +5091,15 @@ hist_pre <- ggplot(pre_mad_df) +
   facet_grid('Planet\n(Pre-IRMAD)' ~ .)
 
 hist_post <- ggplot(post_mad_df) +
-  geom_density(aes(x = red),
+  geom_density(aes(x = r),
                # color = 'red',
                fill = 'red',
                alpha = 0.33) +
-  geom_density(aes(x = green),
+  geom_density(aes(x = g),
                # color = 'red',
                fill = 'green',
                alpha = 0.33) +
-  geom_density(aes(x = blue),
+  geom_density(aes(x = b),
                # color = 'red',
                fill = 'blue',
                alpha = 0.33) +
@@ -5069,15 +5111,15 @@ hist_post <- ggplot(post_mad_df) +
   facet_grid('Planet\n(Post-IRMAD)' ~ .)
 
 hist_sent <- ggplot(sentinel_df) +
-  geom_density(aes(x = B4),
+  geom_density(aes(x = r),
                # color = 'red',
                fill = 'red',
                alpha = 0.33) +
-  geom_density(aes(x = B3),
+  geom_density(aes(x = g),
                # color = 'red',
                fill = 'green',
                alpha = 0.33) +
-  geom_density(aes(x = B2),
+  geom_density(aes(x = b),
                # color = 'red',
                fill = 'blue',
                alpha = 0.33) +
