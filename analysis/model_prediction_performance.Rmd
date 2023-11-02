@@ -1311,6 +1311,9 @@ tiles <- maxar_tiles %>%
   rbind.data.frame(planet_tiles) %>%
   rbind.data.frame(sentinel_tiles)
 
+# st_write(tiles,
+#          './data/rts_polygons/all_tiles.shp')
+
 rm(maxar_tiles, planet_tiles, sentinel_tiles)
 ```
 
