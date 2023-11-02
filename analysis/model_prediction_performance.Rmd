@@ -212,9 +212,10 @@ filter_input_data <- function(input_list, ids) {
 
 ```{r, include = FALSE}
 get_rast_id <- function(rast) {
-  id <- first(str_split(last(str_split(sources(rast), 
+  id <- str_extract(first(str_split(last(str_split(sources(rast), 
                                        '/')[[1]]), 
-                        '\\.')[[1]])
+                        '\\.')[[1]]),
+                    '0{10,}[:alnum:]+')
   return(id)
 }
 ```
@@ -1288,6 +1289,30 @@ gen_vs_act_tiles <- tibble(`Active` = c('4a', '4e', '4f', '67', '68', '89'),
 
 knitr::kable(gen_vs_act_tiles, align = 'cc')
 ```
+
+### Sentinel Water Mask
+
+```{r}
+sentinel_water_files <- list.files(
+  paste0(loc_dir, '/sentinel/water_mask'),
+  full.names = TRUE
+)
+
+sentinel_water <- map(
+  sentinel_water_files,
+  ~ rast(.x) %>%
+    classify(matrix(c(0, 1,
+                      0.5, NA,
+                      1, NA),
+                    ncol = 2,
+                    byrow = TRUE))
+  )
+ids <- map_chr(sentinel_water, ~ get_rast_id(.x))
+names(sentinel_water) <- ids
+
+rm(sentinel_water_files, ids)
+```
+
 
 ## Get Tile Bounding Boxes
 
@@ -4649,7 +4674,6 @@ rts_maps_ndwi <- map(pred_ids,
                  ~ plot_pred_single_band(.x, 'ndwi'))
 walk(rts_maps_ndwi,
      ~ print(.x))
-
 ```
 
 ```{r, fig.width = 12, fig.height = 4.8}
