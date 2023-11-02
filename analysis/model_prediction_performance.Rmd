@@ -529,10 +529,10 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
 
 ```
 
-### plot_pred
+### plot_pred_rgb
 
 ```{r}
-plot_pred <- function(pid) {
+plot_pred_rgb <- function(pid) {
   
   # get polygon data
   current_polys <- polys %>%
@@ -627,10 +627,106 @@ plot_pred <- function(pid) {
 }
 ```
 
-### plot_pred_2
+### plot_pred_single_band
 
 ```{r}
-plot_pred_2 <- function(pid, imagery_types, dims) {
+plot_pred_single_band <- function(pid, input_layer) {
+  
+  # get polygon data
+  current_polys <- polys %>%
+    filter(id == pid) %>%
+    select(imagery, id, status, rts_iou, pq_ci, pq_ci_size, bbox_geometry, 
+           mask_geometry, rts_geometry, val_geometry, pred_geometry) %>%
+    mutate(status = factor(status, levels = c('Active', 'General')))
+  
+  # prep input layer
+  current_rast <- input_data %>%
+    filter(id == pid) %>%
+    full_join(current_polys %>%
+                select(id, imagery, rts_iou),
+              by = c('imagery', 'id', 'rts_iou'))
+  
+  figure <- ggplot(data = current_polys) +
+    geom_raster(data = current_rast,
+                aes(x = x, y = y, fill = .data[[input_layer]]),
+                inherit.aes = FALSE) +
+    scale_fill_viridis(name = input_layer) +
+    geom_sf(aes(geometry = val_geometry,
+                color = 'Validation',
+                linewidth = 'Validation'),
+            fill = 'transparent') +
+    scale_color_manual(name = '',
+                       values = c('gray70'),
+                       guide = guide_legend(order = 4)) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.25),
+                       guide = guide_legend(order = 4)) +
+    new_scale('color') +
+    new_scale('linewidth') +
+    geom_sf(aes(geometry = rts_geometry,
+                color = 'Feature of Interest',
+                linewidth = 'Feature of Interest'),
+            fill = 'transparent') +
+    scale_color_manual(name = '',
+                       values = c('gray90'),
+                       drop = FALSE,
+                       guide = guide_legend(order = 2)) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.5),
+                       guide = guide_legend(order = 2)) +
+    new_scale('color') +
+    new_scale('linewidth') +
+    geom_sf(aes(geometry = mask_geometry,
+                color = 'Mask',
+                linewidth = 'Mask',
+                linetype = 'Mask'),
+            fill = 'transparent') +
+    scale_color_manual(name = '',
+                       values = 'gray90',
+                       drop = FALSE,
+                       guide = guide_legend(order = 3)) +
+    scale_linewidth_manual(name = '',
+                           values = c(0.25),
+                       guide = guide_legend(order = 3)) +
+    scale_linetype_manual(name = '',
+                          values = c('dashed'),
+                       guide = guide_legend(order = 3)) +
+    new_scale('color') +
+    geom_sf(aes(geometry = pred_geometry,
+                color = pq_ci),
+            fill = 'transparent',
+            linewidth = 0.5) +
+    scale_color_manual(name = 'Prediction\n(Quality)',
+                       breaks = pq_labels,
+                       labels = pq_labels,
+                       values = pq_colors,
+                       drop = FALSE,
+                       guide = guide_legend(order = 1, nrow = 3)) +
+    facet_grid(
+      paste('ID:', str_remove(id, "^0+")) ~ 
+        imagery + paste('RTS IoU:', round(rts_iou, 2))
+      ) +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          legend.position = 'bottom')
+
+  # print(figure)
+  
+  # ggsave(paste0('./figures/rts_features/', pid, '.pdf'),
+  #        figure,
+  #        height = 3,
+  #        width = 6.5)
+
+  return(figure)
+  
+}
+```
+
+### plot_pred_rgb_2
+
+```{r}
+plot_pred_rgb_2 <- function(pid, imagery_types, dims) {
   
   # get polygon data
   current_polys <- polys %>%
@@ -4469,7 +4565,7 @@ map_dimensions <- polys %>%
 
 rts_maps_subset <- map(
   id_subset,
-  ~ plot_pred_2(.x, imagery_labels, map_dimensions)
+  ~ plot_pred_rgb_2(.x, imagery_labels, map_dimensions)
 )
 ```
 
@@ -4518,13 +4614,55 @@ rts_highlights_plot
 
 ## Plot Features
 
-Visualize the RTS predictions
+Visualize the RTS predictions on RGB imagery
 
 ```{r fig.width = 12, fig.height = 4.8}
 rts_maps <- map(pred_ids,
-                 ~ plot_pred(.x))
+                 ~ plot_pred_rgb(.x))
 walk(rts_maps,
      ~ print(.x))
+```
+
+Visualize the RTS predictions on non-RGB layers
+
+```{r, fig.width = 12, fig.height = 4.8}
+rts_maps_nir <- map(pred_ids,
+                 ~ plot_pred_single_band(.x, 'nir'))
+walk(rts_maps_nir,
+     ~ print(.x))
+
+```
+
+```{r, fig.width = 12, fig.height = 4.8}
+rts_maps_ndvi <- map(pred_ids,
+                 ~ plot_pred_single_band(.x, 'ndvi'))
+walk(rts_maps_ndvi,
+     ~ print(.x))
+
+```
+
+```{r, fig.width = 12, fig.height = 4.8}
+rts_maps_ndwi <- map(pred_ids,
+                 ~ plot_pred_single_band(.x, 'ndwi'))
+walk(rts_maps_ndwi,
+     ~ print(.x))
+
+```
+
+```{r, fig.width = 12, fig.height = 4.8}
+rts_maps_elev <- map(pred_ids,
+                 ~ plot_pred_single_band(.x, 'elev'))
+walk(rts_maps_elev,
+     ~ print(.x))
+
+```
+
+```{r, fig.width = 12, fig.height = 4.8}
+rts_maps_sr <- map(pred_ids,
+                 ~ plot_pred_single_band(.x, 'sr'))
+walk(rts_maps_sr,
+     ~ print(.x))
+
 ```
 
 WorldView High Quality Predictions
