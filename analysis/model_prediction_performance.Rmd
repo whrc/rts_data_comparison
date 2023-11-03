@@ -208,6 +208,35 @@ filter_input_data <- function(input_list, ids) {
 }
 ```
 
+### format_water_mask
+
+``` {r}
+format_water_mask <- function(x, y) {
+  formatted_mask <- x %>%
+    classify(matrix(c(0, 1,
+                      0.5, NA,
+                      1, NA),
+                    ncol = 2,
+                    byrow = TRUE)) %>%
+    disagg(5) %>%
+    project(y, align = TRUE) %>%
+    crop(y)
+  
+  names(formatted_mask) <- c('water')
+
+  return(formatted_mask)
+}
+```
+
+### remove_rts_from_water_mask
+
+```{r}
+remove_rts_from_water_mask <- function(x, y) {
+  x[y[['validation']] == 1] <- 1
+  return(x)
+}
+```
+
 ### get_rast_id
 
 ```{r, include = FALSE}
@@ -258,7 +287,7 @@ input_as_df <- function(input, pred) {
   input[['prediction']] <- pred[['prediction']]
   
   # unify layer names
-  names(input) <- c('r', 'g', 'b', 'ndvi', 'elev', 'sr', 'nir', 'ndwi', 'rts_class', 'prediction')
+  names(input) <- c('r', 'g', 'b', 'ndvi', 'elev', 'sr', 'nir', 'ndwi', 'rts_class', 'water', 'prediction')
   
   # get polygon ID
   current_id <- get_rast_id(input)
@@ -281,6 +310,12 @@ input_as_df <- function(input, pred) {
              case_when(is.na(rts_class) ~ 'bg',
                        rts_class == 1 ~ 'rts'),
              levels = c('rts', 'bg')
+           ),
+           rts_class_water = factor(
+             case_when(rts_class == 'rts' ~ 'rts',
+                       rts_class == 'bg' & water == 1 ~ 'bg',
+                       rts_class == 'bg' & is.na(water) ~ 'water'),
+             levels = c('rts', 'bg', 'water')
            ),
            r = r/max(r, na.rm = TRUE),
            g = g/max(g, na.rm = TRUE),
@@ -968,6 +1003,353 @@ plot_zonal_stats <- function(x_var, y_var, contrasts, limits) {
 }
 ```
 
+### plot_zonal_stats_water
+
+```{r, warning = FALSE}
+plot_zonal_stats_water <- function(x_var, y_var, contrasts, limits) {
+  
+  predictor_name <- case_when(
+    y_var == 'r_mean' ~ "expression('Red')",
+    y_var == 'g_mean' ~ "expression('Green')",
+    y_var == 'b_mean' ~ "expression('Blue')",
+    y_var == 'lum_mean' ~ "expression('Luminance')",
+    y_var == 'nir_mean' ~ "expression('NIR')",
+    y_var == 'ndvi_mean' ~ "expression('NDVI')",
+    y_var == 'ndwi_mean' ~ "expression('NDWI')",
+    y_var == 'elev_mean' ~ "expression('Relative Elevation')",
+    y_var == 'sr_mean' ~ "expression('Shaded Relief')",
+    y_var == 'r_sd' ~ "expression(sigma ~ 'Red')",
+    y_var == 'g_sd' ~ "expression(sigma ~ 'Green')",
+    y_var == 'b_sd' ~ "expression(sigma ~ 'Blue')",
+    y_var == 'lum_sd' ~ "expression(sigma ~ 'Luminance')",
+    y_var == 'nir_sd' ~ "expression(sigma ~ 'NIR')",
+    y_var == 'ndvi_sd' ~ "expression(sigma ~ 'NDVI')",
+    y_var == 'ndwi_sd' ~ "expression(sigma ~ 'NDWI')",
+    y_var == 'elev_sd' ~ "expression(sigma ~ 'Relative Elevation')",
+    y_var == 'sr_sd' ~ "expression(sigma ~ 'Shaded Relief')"
+  )
+  
+  rts_fig <- ggplot(zonal_stats_water %>%
+                      filter(rts_class == 'RTS'), 
+                    aes(x = .data[[x_var]], 
+                        y = .data[[y_var]], 
+                        color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+      ) +
+    geom_signif(data = contrasts %>%
+                  filter(p_value <= 0.1 & variable == y_var & rts_class == 'RTS'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                tip_length = 0.1,
+                inherit.aes = FALSE,
+                na.rm = TRUE) +
+    scale_y_continuous(eval(parse(text = predictor_name))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'RTS') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+
+  delta_bg_fig <- ggplot(zonal_stats_water %>%
+                        filter(rts_class == 'Delta BG'), 
+                      aes(x = .data[[x_var]], 
+                          y = .data[[y_var]], 
+                          color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+      ) +
+    geom_signif(data = contrasts %>%
+                  filter(p_value <= 0.1 & variable == y_var & rts_class == 'Delta BG'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE,
+                na.rm = TRUE) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(eval(parse(text = predictor_name))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid("Delta ~ '(RTS - BG)'" ~ imagery, labeller = label_parsed) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'Delta BG') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  bg_fig <- ggplot(zonal_stats_water %>%
+                     filter(rts_class == 'Background'), 
+                   aes(x = .data[[x_var]], 
+                       y = .data[[y_var]], 
+                       color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+      ) +
+    geom_signif(data = contrasts %>%
+                  filter(p_value <= 0.1 &variable == y_var & rts_class == 'Background'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE,
+                na.rm = TRUE) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(eval(parse(text = predictor_name))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'Background') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+
+    water_fig <- ggplot(zonal_stats_water %>%
+                     filter(rts_class == 'Water'), 
+                   aes(x = .data[[x_var]], 
+                       y = .data[[y_var]], 
+                       color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+      ) +
+    geom_signif(data = contrasts %>%
+                  filter(p_value <= 0.1 &variable == y_var & rts_class == 'Water'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE,
+                na.rm = TRUE) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(eval(parse(text = predictor_name))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt"))
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'Water') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+
+  delta_water_fig <- ggplot(zonal_stats_water %>%
+                        filter(rts_class == 'Delta Water'), 
+                      aes(x = .data[[x_var]], 
+                          y = .data[[y_var]], 
+                          color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+      ) +
+    geom_signif(data = contrasts %>%
+                  filter(p_value <= 0.1 & variable == y_var & rts_class == 'Delta Water'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE,
+                na.rm = TRUE) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(eval(parse(text = predictor_name))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid("Delta ~ '(RTS - Water)'" ~ imagery, labeller = label_parsed) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'Delta Water') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  zonal_stats_fig <- (
+    bg_fig +
+      theme(axis.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            axis.title = element_blank())
+  ) / (
+    delta_bg_fig +
+      theme(strip.background.x = element_blank(),
+            strip.text.x = element_blank(),
+            axis.title = element_blank(),
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank())
+  ) / (
+    rts_fig +
+      theme(strip.background.x = element_blank(),
+            strip.text.x = element_blank(),
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank())
+  ) / (
+    delta_water_fig +
+      theme(strip.background.x = element_blank(),
+            strip.text.x = element_blank(),
+            axis.title = element_blank(),
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank())
+  ) / (
+    water_fig +
+      theme(strip.background.x = element_blank(),
+            strip.text.x = element_blank(),
+            axis.title.y = element_blank())
+  )
+  
+  return(zonal_stats_fig)
+}
+```
+
+### plot_zonal_stats_water_2
+
+```{r, warning = FALSE}
+plot_zonal_stats_water_2 <- function(x_var, y_var, contrasts, limits) {
+  
+  predictor_name <- case_when(
+    y_var == 'r_mean' ~ "expression('Red')",
+    y_var == 'g_mean' ~ "expression('Green')",
+    y_var == 'b_mean' ~ "expression('Blue')",
+    y_var == 'lum_mean' ~ "expression('Luminance')",
+    y_var == 'nir_mean' ~ "expression('NIR')",
+    y_var == 'ndvi_mean' ~ "expression('NDVI')",
+    y_var == 'ndwi_mean' ~ "expression('NDWI')",
+    y_var == 'elev_mean' ~ "expression('Relative Elevation')",
+    y_var == 'sr_mean' ~ "expression('Shaded Relief')",
+    y_var == 'r_sd' ~ "expression(sigma ~ 'Red')",
+    y_var == 'g_sd' ~ "expression(sigma ~ 'Green')",
+    y_var == 'b_sd' ~ "expression(sigma ~ 'Blue')",
+    y_var == 'lum_sd' ~ "expression(sigma ~ 'Luminance')",
+    y_var == 'nir_sd' ~ "expression(sigma ~ 'NIR')",
+    y_var == 'ndvi_sd' ~ "expression(sigma ~ 'NDVI')",
+    y_var == 'ndwi_sd' ~ "expression(sigma ~ 'NDWI')",
+    y_var == 'elev_sd' ~ "expression(sigma ~ 'Relative Elevation')",
+    y_var == 'sr_sd' ~ "expression(sigma ~ 'Shaded Relief')"
+  )
+  
+  rts_fig <- ggplot(zonal_stats_water %>%
+                      filter(rts_class == 'RTS'), 
+                    aes(x = .data[[x_var]], 
+                        y = .data[[y_var]], 
+                        color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+      ) +
+    geom_signif(data = contrasts %>%
+                  filter(p_value <= 0.1 & variable == y_var & rts_class == 'RTS'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                tip_length = 0.1,
+                inherit.aes = FALSE,
+                na.rm = TRUE) +
+    scale_y_continuous(eval(parse(text = predictor_name))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'RTS') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+
+  delta_fig <- ggplot(zonal_stats_water %>%
+                        filter(rts_class == 'Delta BG'), 
+                      aes(x = .data[[x_var]], 
+                          y = .data[[y_var]], 
+                          color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+      ) +
+    geom_signif(data = contrasts %>%
+                  filter(p_value <= 0.1 & variable == y_var & rts_class == 'Delta BG'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE,
+                na.rm = TRUE) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(eval(parse(text = predictor_name))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid("Delta ~ '(RTS - BG)'" ~ imagery, labeller = label_parsed) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'Delta BG') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  
+  bg_fig <- ggplot(zonal_stats_water %>%
+                     filter(rts_class == 'Background'), 
+                   aes(x = .data[[x_var]], 
+                       y = .data[[y_var]], 
+                       color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+      ) +
+    geom_signif(data = contrasts %>%
+                  filter(p_value <= 0.1 &variable == y_var & rts_class == 'Background'),
+                aes(x = x_min, y = y, xend = x_max, yend = y,
+                    annotation = star_label, group = contrast),
+                stat="identity",
+                manual = TRUE,
+                inherit.aes = FALSE,
+                na.rm = TRUE) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(eval(parse(text = predictor_name))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery) +
+    theme(plot.margin = margin(0, 0, 0, 0, "pt")) +
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == y_var & rts_class == 'Background') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+
+  zonal_stats_fig <- (
+    rts_fig +
+      theme(axis.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            axis.title.y = element_blank())
+  ) / (
+    delta_fig +
+      theme(strip.background.x = element_blank(),
+            strip.text.x = element_blank(),
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank())
+  ) / (
+    bg_fig +
+      theme(strip.background.x = element_blank(),
+            strip.text.x = element_blank(),
+            axis.title.y = element_blank())
+  )
+  
+  return(zonal_stats_fig)
+}
+```
+
 ### pred_as_poly
 
 ```{r, include = FALSE}
@@ -1140,7 +1522,9 @@ indices <- which(
 pred_ids <- pred_ids[indices]
 
 maxar_preds <- maxar_preds[indices]
+names(maxar_preds) <- pred_ids
 maxar_preds_zscore <- maxar_preds_zscore[indices]
+names(maxar_preds_zscore) <- pred_ids
 
 rm(maxar_pred_files)
 ```
@@ -1167,11 +1551,14 @@ maxar_input_files <- c(
   )
 )
 
+# read in input
 maxar_input <- map(maxar_input_files, ~ rast(.x))
+# filter to only include prediction tiles
+maxar_input <- filter_input_data(maxar_input, pred_ids)
+# apply names
 ids <- map_chr(maxar_input, ~ get_rast_id(.x))
 names(maxar_input) <- ids
 
-maxar_input <- filter_input_data(maxar_input, pred_ids)
 rm(maxar_input_files, ids)
 ```
 
@@ -1189,6 +1576,7 @@ planet_pred_files <- list.files(
 planet_preds <- map(planet_pred_files, ~ import_pred(.x))
 
 planet_preds <- planet_preds[indices]
+names(planet_preds) <- pred_ids
 
 rm(planet_pred_files)
 ```
@@ -1215,11 +1603,14 @@ planet_input_files <- c(
   )
 )
 
+# read in input
 planet_input <- map(planet_input_files, ~ rast(.x))
+# filter to only include prediction tiles
+planet_input <- filter_input_data(planet_input, pred_ids)
+# apply names
 ids <- map_chr(planet_input, ~ get_rast_id(.x))
 names(planet_input) <- ids
 
-planet_input <- filter_input_data(planet_input, pred_ids)
 rm(planet_input_files, ids)
 ```
 
@@ -1236,6 +1627,7 @@ sentinel_pred_files <- list.files(
 sentinel_preds <- map(sentinel_pred_files, ~ import_pred(.x))
 
 sentinel_preds <- sentinel_preds[indices]
+names(sentinel_preds) <- pred_ids
 
 rm(sentinel_pred_files)
 ```
@@ -1262,11 +1654,14 @@ sentinel_input_files <- c(
   )
 )
 
+# read in input
 sentinel_input <- map(sentinel_input_files, ~ rast(.x))
+# filter to only include prediction tiles
+sentinel_input <- filter_input_data(sentinel_input, pred_ids)
+# apply names
 ids <- map_chr(sentinel_input, ~ get_rast_id(.x))
 names(sentinel_input) <- ids
 
-sentinel_input <- filter_input_data(sentinel_input, pred_ids)
 rm(sentinel_input_files, ids)
 ```
 
@@ -1290,27 +1685,138 @@ gen_vs_act_tiles <- tibble(`Active` = c('4a', '4e', '4f', '67', '68', '89'),
 knitr::kable(gen_vs_act_tiles, align = 'cc')
 ```
 
-### Sentinel Water Mask
+### Water Mask
+
+Maxar
 
 ```{r}
-sentinel_water_files <- list.files(
+water_files <- list.files(
   paste0(loc_dir, '/sentinel/water_mask'),
-  full.names = TRUE
+  full.names = TRUE,
+  pattern = 'WorldView'
+)
+
+maxar_water <- map(
+  water_files,
+  ~ rast(.x)[[2]]
+  )
+ids <- map_chr(maxar_water, ~ get_rast_id(.x))
+names(maxar_water) <- ids
+
+maxar_water <- map2(
+  maxar_water,
+  maxar_input,
+  ~ format_water_mask(.x, .y)
+)
+
+maxar_water <- map2(
+  maxar_water,
+  maxar_preds,
+  ~ remove_rts_from_water_mask(.x, .y)
+)
+
+# add mask to input data
+maxar_input <- map2(maxar_input,
+                    maxar_water,
+                    ~ c(.x, .y))
+```
+
+```{r}
+# walk2(maxar_input,
+#       maxar_water,
+#       ~ plotRGB(
+#           mask(.x, .y),
+#           r = 1, g = 2, b = 3, stretch = 'lin', colNA = 'red')
+# )
+```
+
+Planet
+
+```{r}
+water_files <- list.files(
+  paste0(loc_dir, '/sentinel/water_mask'),
+  full.names = TRUE,
+  pattern = 'PlanetScope'
+)
+
+planet_water <- map(
+  water_files,
+  ~ rast(.x)[[1]]
+  )
+ids <- map_chr(planet_water, ~ get_rast_id(.x))
+names(planet_water) <- ids
+
+planet_water <- map2(
+  planet_water,
+  planet_input,
+  ~ format_water_mask(.x, .y)
+)
+
+planet_water <- map2(
+  planet_water,
+  planet_preds,
+  ~ remove_rts_from_water_mask(.x, .y)
+)
+
+# add mask to input data
+planet_input <- map2(planet_input,
+                     planet_water,
+                     ~ c(.x, .y))
+```
+
+```{r}
+# walk2(planet_input,
+#       planet_water,
+#       ~ plotRGB(
+#           mask(.x, .y),
+#           r = 1, g = 2, b = 3, stretch = 'lin', colNA = 'red')
+# )
+```
+
+Sentinel
+
+```{r}
+water_files <- list.files(
+  paste0(loc_dir, '/sentinel/water_mask'),
+  full.names = TRUE,
+  pattern = 'Sentinel-2.+Sentinel-2'
 )
 
 sentinel_water <- map(
-  sentinel_water_files,
-  ~ rast(.x) %>%
-    classify(matrix(c(0, 1,
-                      0.5, NA,
-                      1, NA),
-                    ncol = 2,
-                    byrow = TRUE))
+  water_files,
+  ~ rast(.x)[[1]]
   )
 ids <- map_chr(sentinel_water, ~ get_rast_id(.x))
-names(sentinel_water) <- ids
 
-rm(sentinel_water_files, ids)
+sentinel_water <- map2(
+  sentinel_water,
+  sentinel_input,
+  ~ format_water_mask(.x, .y)
+)
+
+sentinel_water <- map2(
+  sentinel_water,
+  sentinel_preds,
+  ~ remove_rts_from_water_mask(.x, .y)
+)
+
+names(sentinel_water) <- c('water')
+
+# add mask to input data
+sentinel_input <- map2(sentinel_input,
+                       sentinel_water,
+                       ~ c(.x, .y))
+
+rm(ids, water_files)
+```
+
+```{r}
+# walk2(sentinel_input,
+#       sentinel_water,
+#       ~ plotRGB(
+#           mask(.x, .y),
+#           r = 1, g = 2, b = 3, stretch = 'lin', colNA = 'red')
+# )
 ```
 
 
@@ -1753,7 +2259,7 @@ input_data <- pmap(list(x = maxar_input,
     imagery,
     levels = c('WorldView', 'PlanetScope', 'Sentinel-2'))
     ) %>%
-  select(imagery, id, rts_class, x, y, 
+  select(imagery, id, rts_class, rts_class_water, x, y, 
          r, g, b, lum, nir, ndvi, ndwi, elev, sr, 
          r_stretch, g_stretch, b_stretch, color_hex, prediction)
 ```
@@ -2746,10 +3252,82 @@ zonal_stats <- input_data %>%
                             levels = c('RTS', 'Delta', 'Background'))) %>%
   pivot_wider(names_from = c('variable', 'metric'),
               values_from = 'value')
+
+zonal_stats_water <- input_data %>%
+  filter(mask == 1) %>%
+  summarise(across(r:sr, mean, .names = "{.col}_mean"),
+            across(r:sr, sd, .names = "{.col}_sd"),
+            .by = c(imagery, id, region, rts_class_water, rts_area, rts_shape, 
+                    rts_iou, mean_iou, mean_iou_v2, pq_ci, pq_ci_size)) %>%
+  pivot_wider(names_from = 'rts_class_water', 
+              values_from = c(r_mean:sr_sd)) %>%
+  mutate(r_mean_deltaBG = (r_mean_rts - r_mean_bg),
+         g_mean_deltaBG = (g_mean_rts - g_mean_bg),
+         b_mean_deltaBG = (b_mean_rts - b_mean_bg),
+         lum_mean_deltaBG = (lum_mean_rts - lum_mean_bg),
+         nir_mean_deltaBG = (nir_mean_rts - nir_mean_bg),
+         ndvi_mean_deltaBG = (ndvi_mean_rts - ndvi_mean_bg),
+         ndwi_mean_deltaBG = (ndwi_mean_rts - ndwi_mean_bg),
+         elev_mean_deltaBG = (elev_mean_rts - elev_mean_bg),
+         sr_mean_deltaBG = (sr_mean_rts - sr_mean_bg),
+         r_mean_deltaWater = (r_mean_rts - r_mean_water),
+         g_mean_deltaWater = (g_mean_rts - g_mean_water),
+         b_mean_deltaWater = (b_mean_rts - b_mean_water),
+         lum_mean_deltaWater = (lum_mean_rts - lum_mean_water),
+         nir_mean_deltaWater = (nir_mean_rts - nir_mean_water),
+         ndvi_mean_deltaWater = (ndvi_mean_rts - ndvi_mean_water),
+         ndwi_mean_deltaWater = (ndwi_mean_rts - ndwi_mean_water),
+         elev_mean_deltaWater = (elev_mean_rts - elev_mean_water),
+         sr_mean_deltaWater = (sr_mean_rts - sr_mean_water),
+         r_sd_deltaBG = (r_sd_rts - r_sd_bg),
+         b_sd_deltaBG = (b_sd_rts - b_sd_bg),
+         g_sd_deltaBG = (g_sd_rts - g_sd_bg),
+         lum_sd_deltaBG = (lum_sd_rts - lum_sd_bg),
+         nir_sd_deltaBG = (nir_sd_rts - nir_sd_bg),
+         ndvi_sd_deltaBG = (ndvi_sd_rts - ndvi_sd_bg),
+         ndwi_sd_deltaBG = (ndwi_sd_rts - ndwi_sd_bg),
+         elev_sd_deltaBG = (elev_sd_rts - elev_sd_bg),
+         sr_sd_deltaBG = (sr_sd_rts - sr_sd_bg),
+         r_sd_deltaWater = (r_sd_rts - r_sd_water),
+         b_sd_deltaWater = (b_sd_rts - b_sd_water),
+         g_sd_deltaWater = (g_sd_rts - g_sd_water),
+         lum_sd_deltaWater = (lum_sd_rts - lum_sd_water),
+         nir_sd_deltaWater = (nir_sd_rts - nir_sd_water),
+         ndvi_sd_deltaWater = (ndvi_sd_rts - ndvi_sd_water),
+         ndwi_sd_deltaWater = (ndwi_sd_rts - ndwi_sd_water),
+         elev_sd_deltaWater = (elev_sd_rts - elev_sd_water),
+         sr_sd_deltaWater = (sr_sd_rts - sr_sd_water)) %>%
+  pivot_longer(r_mean_bg:sr_sd_deltaWater, 
+               names_to = 'variable', 
+               values_to = 'value') %>%
+  separate(variable, 
+           into = c('variable', 'metric', 'rts_class'), 
+           sep = '_') %>%
+  mutate(rts_class = factor(case_when(rts_class == 'rts' ~ 'RTS',
+                                      rts_class == 'bg' ~ 'Background',
+                                      rts_class == 'water' ~ 'Water',
+                                      rts_class == 'deltaBG' ~ 'Delta BG',
+                                      rts_class == 'deltaWater' ~ 'Delta Water'),
+                            levels = c('RTS', 'Background', 'Water', 'Delta BG', 'Delta Water'))) %>%
+  pivot_wider(names_from = c('variable', 'metric'),
+              values_from = 'value')
 ```
 
 ```{r}
 lm_output <- zonal_stats %>%
+  select(imagery:sr_sd, pq_ci, pq_ci_size) %>%
+  pivot_longer(r_mean:sr_sd, names_to = 'variable', values_to = 'value') %>%
+  group_by(rts_class, imagery, variable) %>%
+  nest() %>% 
+  mutate(models_pq = map(data, 
+                         possibly(lm_pq, otherwise = NA)),
+         summary_pq = map(models_pq, 
+                          possibly(lm_summary, otherwise = NA)),
+         contrasts_pq = map(models_pq, 
+                            possibly(lm_contrasts_pq, 
+                                     otherwise = NA)))
+
+lm_output_water <- zonal_stats_water %>%
   select(imagery:sr_sd, pq_ci, pq_ci_size) %>%
   pivot_longer(r_mean:sr_sd, names_to = 'variable', values_to = 'value') %>%
   group_by(rts_class, imagery, variable) %>%
@@ -2776,12 +3354,41 @@ zonal_stats_contrasts <- lm_output %>%
                                    levels = pq_labels)) + 0.05,
          x_max = as.numeric(factor(x_max,
                                    levels = pq_labels)) - 0.05)
+
+zonal_stats_contrasts_water <- lm_output_water %>%
+  select(imagery, rts_class, variable, contrasts_pq) %>%
+  unnest(cols = c(contrasts_pq)) %>%
+  ungroup() %>%
+  separate_wider_delim(contrast, 
+                       delim = ' - ', 
+                       names = c('x_min', 'x_max'), 
+                       cols_remove = FALSE) %>%
+  mutate(x_min = as.numeric(factor(x_min,
+                                   levels = pq_labels)) + 0.05,
+         x_max = as.numeric(factor(x_max,
+                                   levels = pq_labels)) - 0.05)
 ```
 
 ```{r}
 # calculate figure y-limits by hand
 # (1.5*IQR is the upper and lower whisker limit; 1.05 is the default axis expansion by ggplot)
 zonal_stats_limits <- zonal_stats %>%
+  select(imagery:sr_sd, pq_ci) %>%
+  pivot_longer(r_mean:sr_sd,  names_to = 'variable', values_to = 'value') %>%
+  summarise(
+    # lwr = min(trim_outliers(value), na.rm = TRUE), # use this if removing outliers from plots
+    # upr = max(trim_outliers(value), na.rm = TRUE),
+    lwr = min(value, na.rm = TRUE),
+    upr = max(value, na.rm = TRUE),
+    .by = c(imagery, pq_ci, rts_class, variable)
+    ) %>%
+  mutate(lim_lwr = upr - (upr - lwr)*1.05,
+         lim_upr = lwr + (upr - lwr)*1.05) %>%
+  summarise(lwr = min(lim_lwr),
+            upr = max(lim_upr),
+            .by = c(variable, rts_class))
+
+zonal_stats_limits_water <- zonal_stats_water %>%
   select(imagery:sr_sd, pq_ci) %>%
   pivot_longer(r_mean:sr_sd,  names_to = 'variable', values_to = 'value') %>%
   summarise(
@@ -2823,6 +3430,29 @@ zonal_stats_limits <- zonal_stats_limits %>%
                          TRUE ~ upr)) %>%
   select(-new_upr)
 
+zonal_stats_contrasts_water <- zonal_stats_contrasts_water %>%
+  left_join(zonal_stats_limits_water, by = c('variable', 'rts_class')) %>%
+  mutate(n = n(),
+         y = case_when(
+           n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.2,
+           TRUE ~ lwr + (upr - lwr)*1.05
+           ),
+         upr = case_when(
+           n >= 2 & contrast == 'High - Low' ~ lwr + (upr - lwr)*1.3,
+           TRUE ~ lwr + (upr - lwr)*1.15),
+         .by = c(imagery, rts_class, variable)
+         )
+
+# add new upr limits back to limits tibble
+zonal_stats_limits_water <- zonal_stats_limits_water %>%
+  left_join(zonal_stats_contrasts_water %>%
+              select(imagery, rts_class, variable, upr) %>%
+              group_by(rts_class, variable) %>%
+              summarise(new_upr = max(upr)),
+            by = c('rts_class', 'variable')) %>%
+  mutate(upr = case_when(!is.na(new_upr) ~ new_upr,
+                         TRUE ~ upr)) %>%
+  select(-new_upr)
 ```
 
 
@@ -2858,9 +3488,64 @@ zonal_stats_figs[['g_mean']]
 zonal_stats_figs[['b_mean']]
 zonal_stats_figs[['lum_mean']]
 
+```
+
+-   Poorly predicted RTS in the PlanetScope and Sentinel models had higher NIR values within features. Both plants and soil reflect a lot of NIR... so what this means is a bit unclear.
+
+```{r, fig.width = 7, fig.height = 6}
+zonal_stats_figs[['nir_mean']]
+
+# ggsave('./figures/zonal_stats_nir.pdf',
+#        zonal_stats_figs[['nir_mean']],
+#        height = 5.5,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_nir.jpg',
+#        zonal_stats_figs[['nir_mean']],
+#        height = 5.5,
+#        width = 6.5)
+```
+
+I didn't find much interesting about the rest of these figures, but they are included  here for completeness:
+
+```{r, fig.width = 7, fig.height = 6}
+zonal_stats_figs[['ndvi_mean']]
+zonal_stats_figs[['ndwi_mean']]
+zonal_stats_figs[['elev_mean']]
+zonal_stats_figs[['sr_mean']]
+zonal_stats_figs[['r_sd']]
+zonal_stats_figs[['g_sd']]
+zonal_stats_figs[['b_sd']]
+zonal_stats_figs[['lum_sd']]
+zonal_stats_figs[['nir_sd']]
+zonal_stats_figs[['ndvi_sd']]
+zonal_stats_figs[['ndwi_sd']]
+zonal_stats_figs[['elev_sd']]
+zonal_stats_figs[['sr_sd']]
+```
+
+```{r, include = FALSE}
+zonal_stats_water_figs <- map(
+  variables,
+  ~ plot_zonal_stats_water(
+    x_var = 'pq_ci',
+    y_var = .x, 
+    contrasts = zonal_stats_contrasts_water %>%
+      filter(p_value <= 0.1),
+    limits = zonal_stats_limits_water)
+)
+names(zonal_stats_water_figs) <- variables
+```
+
+- Bright RTS are predicted better in Planet imagery.
+```{r, fig.height = 8, fig.width = 6.5}
+zonal_stats_water_figs[['lum_mean']]
+zonal_stats_water_figs[['r_mean']]
+zonal_stats_water_figs[['g_mean']]
+zonal_stats_water_figs[['b_mean']]
+
 lum_delta_fig <- ggplot(
-  zonal_stats %>%
-    filter(rts_class == 'Delta'), 
+  zonal_stats_water %>%
+    filter(rts_class == 'Delta BG'), 
   aes(x = pq_ci, 
       y = lum_mean, 
       color = pq_ci)
@@ -2869,8 +3554,8 @@ lum_delta_fig <- ggplot(
     # outlier.shape = NA
   ) +
   geom_signif(
-    data = zonal_stats_contrasts %>%
-      filter(p_value <= 0.1 & variable == 'lum_mean' & rts_class == 'Delta'),
+    data = zonal_stats_contrasts_water %>%
+      filter(p_value <= 0.1 & variable == 'lum_mean' & rts_class == 'Delta BG'),
     aes(x = x_min, y = y, xend = x_max, yend = y,
         annotation = star_label, group = contrast),
     stat="identity",
@@ -2882,16 +3567,16 @@ lum_delta_fig <- ggplot(
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid(. ~ imagery) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == 'lum_mean' & rts_class == 'Delta') %>%
+    coord_cartesian(ylim = zonal_stats_limits_water %>%
+                      filter(variable == 'lum_mean' & rts_class == 'Delta BG') %>%
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
 lum_delta_fig
 
 r_delta_fig <- ggplot(
-  zonal_stats %>%
-    filter(rts_class == 'Delta'), 
+  zonal_stats_water %>%
+    filter(rts_class == 'Delta BG'), 
   aes(x = pq_ci, 
       y = r_mean, 
       color = pq_ci)
@@ -2900,8 +3585,8 @@ r_delta_fig <- ggplot(
     # outlier.shape = NA
   ) +
   geom_signif(
-    data = zonal_stats_contrasts %>%
-      filter(p_value <= 0.1 & variable == 'r_mean' & rts_class == 'Delta'),
+    data = zonal_stats_contrasts_water %>%
+      filter(p_value <= 0.1 & variable == 'r_mean' & rts_class == 'Delta BG'),
     aes(x = x_min, y = y, xend = x_max, yend = y,
         annotation = star_label, group = contrast),
     stat="identity",
@@ -2913,15 +3598,15 @@ r_delta_fig <- ggplot(
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid('Red' ~ imagery) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == 'r_mean' & rts_class == 'Delta') %>%
+    coord_cartesian(ylim = zonal_stats_limits_water %>%
+                      filter(variable == 'r_mean' & rts_class == 'Delta BG') %>%
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
 
 g_delta_fig <- ggplot(
-  zonal_stats %>%
-    filter(rts_class == 'Delta'), 
+  zonal_stats_water %>%
+    filter(rts_class == 'Delta BG'), 
   aes(x = pq_ci, 
       y = r_mean, 
       color = pq_ci)
@@ -2930,8 +3615,8 @@ g_delta_fig <- ggplot(
     # outlier.shape = NA
   ) +
   geom_signif(
-    data = zonal_stats_contrasts %>%
-      filter(p_value <= 0.1 & variable == 'g_mean' & rts_class == 'Delta'),
+    data = zonal_stats_contrasts_water %>%
+      filter(p_value <= 0.1 & variable == 'g_mean' & rts_class == 'Delta BG'),
     aes(x = x_min, y = y, xend = x_max, yend = y,
         annotation = star_label, group = contrast),
     stat="identity",
@@ -2943,15 +3628,15 @@ g_delta_fig <- ggplot(
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid('Green' ~ imagery) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == 'g_mean' & rts_class == 'Delta') %>%
+    coord_cartesian(ylim = zonal_stats_limits_water %>%
+                      filter(variable == 'g_mean' & rts_class == 'Delta BG') %>%
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
 
 b_delta_fig <- ggplot(
-  zonal_stats %>%
-    filter(rts_class == 'Delta'), 
+  zonal_stats_water %>%
+    filter(rts_class == 'Delta BG'), 
   aes(x = pq_ci, 
       y = b_mean, 
       color = pq_ci)
@@ -2960,8 +3645,8 @@ b_delta_fig <- ggplot(
     # outlier.shape = NA
   ) +
   geom_signif(
-    data = zonal_stats_contrasts %>%
-      filter(p_value <= 0.1 & variable == 'b_mean' & rts_class == 'Delta'),
+    data = zonal_stats_contrasts_water %>%
+      filter(p_value <= 0.1 & variable == 'b_mean' & rts_class == 'Delta BG'),
     aes(x = x_min, y = y, xend = x_max, yend = y,
         annotation = star_label, group = contrast),
     stat="identity",
@@ -2973,8 +3658,8 @@ b_delta_fig <- ggplot(
     scale_color_manual(values = pq_colors,
                        guide = 'none') +
     facet_grid('Blue' ~ imagery) +
-    coord_cartesian(ylim = zonal_stats_limits %>%
-                      filter(variable == 'b_mean' & rts_class == 'Delta') %>%
+    coord_cartesian(ylim = zonal_stats_limits_water %>%
+                      filter(variable == 'b_mean' & rts_class == 'Delta BG') %>%
                       ungroup() %>%
                       select(lwr, upr) %>%
                       as_vector())
@@ -3056,37 +3741,48 @@ rgb_delta_fig
 #        width = 6.5)
 ```
 
--   Poorly predicted RTS in the PlanetScope and Sentinel models had higher NIR values within features. Both plants and soil reflect a lot of NIR... so what this means is a bit unclear.
+- More plants within RTS or fewer plants in background pixels leads to poor predictions, as seen in NIR and NDVI
 
-```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['nir_mean']]
+```{r, fig.height = 5, fig.width = 6.5}
+zonal_stats_water_figs[['nir_mean']]
+zonal_stats_water_figs[['ndvi_mean']]
 
-# ggsave('./figures/zonal_stats_nir.pdf',
-#        zonal_stats_figs[['nir_mean']],
-#        height = 5.5,
-#        width = 6.5)
-# ggsave('./figures/zonal_stats_nir.jpg',
-#        zonal_stats_figs[['nir_mean']],
-#        height = 5.5,
-#        width = 6.5)
+zonal_stats_nir <- plot_zonal_stats_water_2(
+  'pq_ci', 
+  'nir_mean', 
+  zonal_stats_contrasts_water, 
+  zonal_stats_limits_water
+)
+zonal_stats_nir
+
+zonal_stats_ndvi <- plot_zonal_stats_water_2(
+  'pq_ci', 
+  'ndvi_mean', 
+  zonal_stats_contrasts_water, 
+  zonal_stats_limits_water
+)
+zonal_stats_ndvi
+
 ```
 
-I didn't find much interesting about the rest of these figures, but they are included  here for completeness:
+- RTS were predicted poorly in wet landscapes (PlanetScope)
 
-```{r, fig.width = 7, fig.height = 6}
-zonal_stats_figs[['ndvi_mean']]
-zonal_stats_figs[['ndwi_mean']]
-zonal_stats_figs[['elev_mean']]
-zonal_stats_figs[['sr_mean']]
-zonal_stats_figs[['r_sd']]
-zonal_stats_figs[['g_sd']]
-zonal_stats_figs[['b_sd']]
-zonal_stats_figs[['lum_sd']]
-zonal_stats_figs[['nir_sd']]
-zonal_stats_figs[['ndvi_sd']]
-zonal_stats_figs[['ndwi_sd']]
-zonal_stats_figs[['elev_sd']]
-zonal_stats_figs[['sr_sd']]
+```{r, fig.height = 8, fig.width = 6.5}
+zonal_stats_water_figs[['ndwi_mean']]
+```
+
+- RTS were predicted poorly where the background was patchy/highly variable in the visible bands
+
+```{r, fig.height = 8, fig.width = 6.5}
+zonal_stats_water_figs[['lum_sd']]
+zonal_stats_water_figs[['r_sd']]
+zonal_stats_water_figs[['g_sd']]
+zonal_stats_water_figs[['b_sd']]
+```
+
+```{r, fig.height = 8, fig.width = 6.5}
+map(zonal_stats_water_figs,
+    ~ .x)
 ```
 
 ### Prediction Probability
