@@ -1350,6 +1350,264 @@ plot_zonal_stats_water_2 <- function(x_var, y_var, contrasts, limits) {
 }
 ```
 
+### plot_zonal_stats_water_3
+
+```{r, warning = FALSE}
+plot_zonal_stats_water_3 <- function(x_var, y_vars, contrasts, limits) {
+  
+  predictor_names <- case_when(
+    y_vars == 'r_mean' ~ "expression('Red')",
+    y_vars == 'g_mean' ~ "expression('Green')",
+    y_vars == 'b_mean' ~ "expression('Blue')",
+    y_vars == 'lum_mean' ~ "expression('Luminance')",
+    y_vars == 'nir_mean' ~ "expression('NIR')",
+    y_vars == 'ndvi_mean' ~ "expression('NDVI')",
+    y_vars == 'ndwi_mean' ~ "expression('NDWI')",
+    y_vars == 'elev_mean' ~ "expression('Relative Elevation')",
+    y_vars == 'sr_mean' ~ "expression('Shaded Relief')",
+    y_vars == 'r_sd' ~ "expression(sigma ~ 'Red')",
+    y_vars == 'g_sd' ~ "expression(sigma ~ 'Green')",
+    y_vars == 'b_sd' ~ "expression(sigma ~ 'Blue')",
+    y_vars == 'lum_sd' ~ "expression(sigma ~ 'Luminance')",
+    y_vars == 'nir_sd' ~ "expression(sigma ~ 'NIR')",
+    y_vars == 'ndvi_sd' ~ "expression(sigma ~ 'NDVI')",
+    y_vars == 'ndwi_sd' ~ "expression(sigma ~ 'NDWI')",
+    y_vars == 'elev_sd' ~ "expression(sigma ~ 'Relative Elevation')",
+    y_vars == 'sr_sd' ~ "expression(sigma ~ 'Shaded Relief')"
+  )
+  
+  rts_figs <- map2(
+    y_vars,
+    predictor_names,
+    ~ ggplot(zonal_stats_water %>%
+               filter(rts_class == 'RTS'), 
+             aes(x = .data[[x_var]], 
+                 y = .data[[.x]], 
+                 color = .data[[x_var]])) +
+      geom_boxplot(
+        # outlier.shape = NA
+        na.rm = TRUE
+      ) +
+      geom_signif(
+        data = contrasts %>%
+          filter(p_value <= 0.1 & variable == .x & rts_class == 'RTS'),
+        aes(x = x_min, y = y, xend = x_max, yend = y,
+            annotation = star_label, group = contrast),
+        stat="identity",
+        manual = TRUE,
+        tip_length = 0.1,
+        inherit.aes = FALSE,
+        na.rm = TRUE
+      ) +
+      scale_y_continuous(eval(parse(text = .y))) +
+      scale_color_manual(values = pq_colors,
+                         guide = 'none') +
+      facet_grid(rts_class ~ imagery) +
+      theme(axis.title.x = element_blank(),
+            plot.margin = margin(0, 0, 0, 0, "pt")) +
+      coord_cartesian(ylim = limits %>%
+                        filter(variable == .x & rts_class == 'RTS') %>%
+                        ungroup() %>%
+                        select(lwr, upr) %>%
+                        as_vector())
+  )
+  
+  delta_figs <- map2(
+    y_vars,
+    predictor_names,
+    ~ ggplot(zonal_stats_water %>%
+                        filter(rts_class == 'Delta BG'), 
+                      aes(x = .data[[x_var]], 
+                          y = .data[[.x]], 
+                          color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+    ) +
+      geom_signif(
+        data = contrasts %>%
+          filter(p_value <= 0.1 & variable == .x & rts_class == 'Delta BG'),
+        aes(x = x_min, y = y, xend = x_max, yend = y,
+            annotation = star_label, group = contrast),
+        stat="identity",
+        manual = TRUE,
+        inherit.aes = FALSE,
+        na.rm = TRUE
+      ) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(eval(parse(text = .y))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid("Delta ~ '(RTS - BG)'" ~ imagery, labeller = label_parsed) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == .x & rts_class == 'Delta BG') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  )
+  
+  bg_figs <- map2(
+    y_vars,
+    predictor_names,
+    ~ ggplot(zonal_stats_water %>%
+                        filter(rts_class == 'Background'), 
+                      aes(x = .data[[x_var]], 
+                          y = .data[[.x]], 
+                          color = .data[[x_var]])) +
+    geom_boxplot(
+      # outlier.shape = NA
+      na.rm = TRUE
+    ) +
+      geom_signif(
+        data = contrasts %>%
+          filter(p_value <= 0.1 & variable == .x & rts_class == 'Background'),
+        aes(x = x_min, y = y, xend = x_max, yend = y,
+            annotation = star_label, group = contrast),
+        stat="identity",
+        manual = TRUE,
+        inherit.aes = FALSE,
+        na.rm = TRUE
+      ) +
+    scale_x_discrete(name = 'Prediction Quality') +
+    scale_y_continuous(eval(parse(text = .y))) +
+    scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid("Background" ~ imagery, labeller = label_parsed) +
+    theme(axis.title.x = element_blank(),
+          plot.margin = margin(0, 0, 0, 0, "pt")) +
+    coord_cartesian(ylim = limits %>%
+                      filter(variable == .x & rts_class == 'Background') %>%
+                      ungroup() %>%
+                      select(lwr, upr) %>%
+                      as_vector())
+  )
+  
+  fig_1 <- wrap_elements(
+    (
+      rts_figs[[1]] +
+        theme(axis.text.x = element_blank(),
+              axis.ticks.x = element_blank(),
+              axis.title.y = element_blank(),
+              strip.background.y = element_blank(),
+              strip.text.y = element_blank(),
+              panel.spacing = unit(2, 'pt'))
+    ) / (
+      delta_figs[[1]] +
+        theme(strip.background = element_blank(),
+              strip.text = element_blank(),
+              axis.text.x = element_blank(),
+              axis.ticks.x = element_blank(),
+              panel.spacing = unit(2, 'pt')) + 
+        plot_layout(tag_level = 'keep')
+    ) / (
+      bg_figs[[1]] +
+        theme(strip.background = element_blank(),
+              strip.text = element_blank(),
+              axis.title = element_blank(),
+              axis.text.x = element_blank(),
+              panel.spacing = unit(2, 'pt')) + 
+        plot_layout(tag_level = 'keep')
+    )
+  )
+  
+  fig_2 <- wrap_elements(
+        (
+          rts_figs[[2]] +
+            theme(axis.text.x = element_blank(),
+                  axis.ticks.x = element_blank(),
+                  axis.title.y = element_blank(),
+                  panel.spacing = unit(2, 'pt'))
+        ) / (
+          delta_figs[[2]] +
+            theme(strip.background.x = element_blank(),
+                  strip.text.x = element_blank(),
+                  axis.text.x = element_blank(),
+                  axis.ticks.x = element_blank(),
+                  axis.title.x = element_blank(),
+                  panel.spacing = unit(2, 'pt')) + 
+        plot_layout(tag_level = 'keep')
+        ) / (
+          bg_figs[[2]] +
+            theme(strip.background.x = element_blank(),
+                  strip.text.x = element_blank(),
+                  axis.title = element_blank(),
+                  axis.text.x = element_blank(),
+                  panel.spacing = unit(2, 'pt')) + 
+            plot_layout(tag_level = 'keep')
+        )
+      )
+  
+  fig_3 <- wrap_elements(
+        (
+          rts_figs[[3]] +
+            theme(axis.text.x = element_blank(),
+                  axis.ticks.x = element_blank(),
+                  axis.title.y = element_blank(),
+                  strip.background = element_blank(),
+                  strip.text = element_blank(),
+                  panel.spacing = unit(2, 'pt'))
+        ) / (
+          delta_figs[[3]] +
+            theme(strip.background = element_blank(),
+                  strip.text = element_blank(),
+                  axis.text.x = element_blank(),
+                  axis.ticks.x = element_blank(),
+                  panel.spacing = unit(2, 'pt')) + 
+        plot_layout(tag_level = 'keep')
+        ) / (
+          bg_figs[[3]] +
+            theme(strip.background = element_blank(),
+                  strip.text = element_blank(),
+                  axis.title.y = element_blank(),
+                  panel.spacing = unit(2, 'pt'),
+                  axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) + 
+        plot_layout(tag_level = 'keep')
+        )
+      )
+  
+  fig_4 <- wrap_elements(
+        (
+          rts_figs[[4]] +
+            theme(strip.background.x = element_blank(),
+                  strip.text.x = element_blank(),
+                  axis.text.x = element_blank(),
+                  axis.ticks.x = element_blank(),
+                  axis.title.y = element_blank(),
+                  panel.spacing = unit(2, 'pt'))
+        ) / (
+          delta_figs[[4]] +
+            theme(strip.background.x = element_blank(),
+                  strip.text.x = element_blank(),
+                  axis.text.x = element_blank(),
+                  axis.ticks.x = element_blank(),
+                  panel.spacing = unit(2, 'pt')) + 
+        plot_layout(tag_level = 'keep')
+        ) / (
+          bg_figs[[4]] +
+            theme(strip.background.x = element_blank(),
+                  strip.text.x = element_blank(),
+                  axis.title.y = element_blank(),
+                  panel.spacing = unit(2, 'pt'),
+                  axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) + 
+        plot_layout(tag_level = 'keep')
+        )
+      )
+  
+  zonal_stats_fig <- (
+    (
+      fig_1 | fig_2
+    ) / (
+      fig_3 | fig_4
+    )
+  ) +
+    plot_annotation(tag_levels = 'a', tag_suffix = '.')
+  
+  return(zonal_stats_fig)
+}
+```
+
 ### pred_as_poly
 
 ```{r, include = FALSE}
@@ -3769,6 +4027,14 @@ zonal_stats_ndvi
 
 ```{r, fig.height = 8, fig.width = 6.5}
 zonal_stats_water_figs[['ndwi_mean']]
+
+zonal_stats_ndwi <- plot_zonal_stats_water_2(
+  'pq_ci', 
+  'ndwi_mean', 
+  zonal_stats_contrasts_water, 
+  zonal_stats_limits_water
+)
+zonal_stats_ndwi
 ```
 
 - RTS were predicted poorly where the background was patchy/highly variable in the visible bands
@@ -3778,6 +4044,14 @@ zonal_stats_water_figs[['lum_sd']]
 zonal_stats_water_figs[['r_sd']]
 zonal_stats_water_figs[['g_sd']]
 zonal_stats_water_figs[['b_sd']]
+
+zonal_stats_rgb_sd <- plot_zonal_stats_water_3(
+  'pq_ci',
+  c('lum_sd', 'r_sd', 'g_sd', 'b_sd'),
+  zonal_stats_contrasts_water,
+  zonal_stats_limits_water
+  )
+zonal_stats_rgb_sd
 ```
 
 ```{r, fig.height = 8, fig.width = 6.5}
