@@ -8,7 +8,7 @@ output:
 
 ## TODO:
 
-- makes maps of predictions on top of non-RGB layers
+- finish figure with zonal stats results 
 
 ## Set-Up
 ```{r setup, include = FALSE}
@@ -347,7 +347,7 @@ import_pred <- function(filepath) {
 lm_contrasts_pq <- function(model) {
   contrasts <- as_tibble(emmeans(model$fit,
                                  pairwise ~ pq_ci,
-                                 adjust = 'dunnettx')$contrasts) %>%
+                                 adjust = 'tukey')$contrasts) %>%
     mutate(star_label = assign_conf_stars(p.value)) %>%
     select(contrast, estimate, se = SE, p_value = p.value, star_label)
 }
@@ -3485,42 +3485,30 @@ Summary Figure of Zonal Stats
 
 ```{r}
 zonal_stats_variables <- zonal_stats_contrasts %>%
-  filter(p_value <= 0.1 & !(variable %in% c('lum_mean', 'lum_sd'))) %>%
+  filter(p_value <= 0.1 & 
+           !(variable %in% c('lum_mean', 'lum_sd', 'elev_sd', 'nir_sd')) &
+           !str_detect(rts_class, 'Water')) %>%
   pull(variable) %>%
   unique()
-# zonal_stats_variables <- c('r_mean',
-#                            'g_mean',
-#                            'b_mean',
-#                            'sr_mean',
-#                            'nir_mean',
-#                            'ndvi_mean',
-#                            'ndwi_mean',
-#                            'r_sd',
-#                            'g_sd',
-#                            'b_sd',
-#                            'nir_sd')
+zonal_stats_variables <- c(zonal_stats_variables, 'b_mean')
 
 zonal_stats_mean <- zonal_stats %>%
   filter(!str_detect(rts_class, 'Water')) %>%
   pivot_longer(r_mean:sr_sd, names_to = 'variable', values_to = 'value') %>%
   summarise(value_mean = mean(value, na.rm = TRUE),
-            value_se = sd(value, na.rm = TRUE)/n(),
+            value_sd = sd(value, na.rm = TRUE),
             .by = c('imagery', 'pq_ci', 'rts_class', 'variable')) %>%
   filter(variable %in% zonal_stats_variables) %>%
   mutate(variable = factor(variable,
                            levels = c('r_mean',
                                       'g_mean',
                                       'b_mean',
-                                      'sr_mean',
                                       'nir_mean',
                                       'ndvi_mean',
                                       'ndwi_mean',
                                       'r_sd',
                                       'g_sd',
-                                      'b_sd',
-                                      'sr_sd',
-                                      'nir_sd',
-                                      'elev_sd')),
+                                      'b_sd')),
          variable_num = case_when(
            pq_ci == 'High' ~ as.numeric(variable) - 0.2,
            pq_ci == 'Expected' ~ as.numeric(variable),
@@ -3548,16 +3536,12 @@ zonal_stats_contrasts_mean <- zonal_stats_contrasts %>%
       levels = c('r_mean',
                  'g_mean',
                  'b_mean',
-                 'sr_mean',
                  'nir_mean',
                  'ndvi_mean',
                  'ndwi_mean',
                  'r_sd',
                  'g_sd',
-                 'b_sd',
-                 'sr_sd',
-                 'nir_sd',
-                 'elev_sd')),
+                 'b_sd')),
     variable_num = as.numeric(variable),
     xmin = case_when(
       contrast %in% c('High - Expected', 'High - Low') ~ variable_num - 0.19,
@@ -3566,11 +3550,14 @@ zonal_stats_contrasts_mean <- zonal_stats_contrasts %>%
     xmax = case_when(
       contrast %in% c('Expected - Low', 'High - Low') ~ variable_num + 0.19,
       contrast == 'High - Expected' ~ variable_num - 0.01
-    )
+    ),
+    y_adjust = case_when(p_value <= 0.05 ~ 0.6,
+                         p_value > 0.05 ~ 0)
   ) %>%
-  select(imagery, rts_class, variable, contrast, estimate, se, p_value, star_label, variable_num, xmin, xmax) %>%
+  select(imagery, rts_class, variable, contrast, estimate, se, p_value, star_label, 
+         y_adjust, variable_num, xmin, xmax) %>%
   left_join(zonal_stats_mean %>%
-              mutate(upr = value_mean + value_se) %>%
+              mutate(upr = value_mean + value_sd) %>%
               filter(upr == max(upr),
                      .by = c('imagery', 'variable', 'rts_class')) %>%
               select(imagery, variable, rts_class, upr),
@@ -3578,20 +3565,30 @@ zonal_stats_contrasts_mean <- zonal_stats_contrasts %>%
   mutate(
     y = case_when(
       contrast %in% c('High - Expected', 'Expected - Low') ~ 
-        upr + 0.03,
+        upr + 0.05,
       contrast == 'High - Low' ~ 
-        upr + 0.15
+        upr + 0.2
     ),
     group = paste(variable, contrast, sep = '_')
   )
 ```
 
-```{r}
+```{r, fig.height = 6, fig.width = 6.5}
+x_axis_labels <- c('Red',
+                   'Green',
+                   'Blue',
+                   'NIR',
+                   'NDVI',
+                   'NDWI',
+                   expression(sigma ~ 'Red'),
+                   expression(sigma ~ 'Green'),
+                   expression(sigma ~ 'Blue'))
+
 ggplot(zonal_stats_mean,
        aes(x = variable_num, color = pq_ci)) +
   # geom_vline(xintercept = c(0.5, 4.5, 6.5, 7.5, 11.5, 12.5, 13.5), color = 'gray80') +
-  geom_rect(data = tibble(xmin = c(0.5, 6.5, 11.5),
-                          xmax = c(4.5, 7.5, 12.5),
+  geom_rect(data = tibble(xmin = c(0.5, 5.5),
+                          xmax = c(3.5, 6.5),
                           ymin = -Inf,
                           ymax = Inf),
             aes(xmin = xmin,
@@ -3602,21 +3599,35 @@ ggplot(zonal_stats_mean,
             fill = 'gray90',
             alpha = 0.5) +
   geom_hline(yintercept = 0, linetype = 'dashed', color = 'gray50') +
-  geom_point(aes(y = value_mean)) +
-  geom_errorbar(aes(ymin = value_mean - value_se, 
-                    ymax = value_mean + value_se),
-                width = 0.25) +
+  geom_point(aes(y = value_mean),
+             size = 0.5) +
+  geom_errorbar(aes(ymin = value_mean - value_sd, 
+                    ymax = value_mean + value_sd),
+                width = 0.25,
+                linewidth = 0.25) +
   geom_signif(data = zonal_stats_contrasts_mean,
               aes(x = xmin, y = y, xend = xmax, yend = y,
-                  annotation = star_label, group = group),
-              stat="identity",
+                  annotation = star_label, vjust = y_adjust,
+                  group = group),
+              stat = "identity",
               manual = TRUE,
+              tip_length = 1,
               inherit.aes = FALSE,
               na.rm = TRUE) +
+  geom_text(
+    data = tibble(
+      x = c(2, 4.5, 6, 8),
+      y = rep(c(-1.4, -1.2), 2),
+      label = c('Luminance', 'Plants', 'Moisture', 'Patchiness')
+    ),
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    size = 2.5
+  ) +
   scale_x_continuous(
     name = 'Variable',
     breaks = seq(1:length(unique(zonal_stats_mean$variable))),
-    labels = levels(zonal_stats_mean$variable),
+    labels = x_axis_labels,
     expand = expansion(mult = c(0.02, 0.033))
     ) +
   scale_y_continuous(name = 'Z-Score') +
@@ -3636,6 +3647,10 @@ lum = [luminance](https://stackoverflow.com/questions/596216/formula-to-determin
 sr = shaded relief
 
 ```{r, include = FALSE}
+variables <- colnames(zonal_stats %>%
+                        ungroup() %>%
+                        select(r_mean:sr_sd))
+
 zonal_stats_figs <- map(
   variables,
   ~ plot_zonal_stats(
@@ -4330,114 +4345,6 @@ autoplot(zonal_stats_pca,
                      labels = c('RTS', 'Background', 'Delta'),
                      values = c(16, 1, 2))
 ```
-
-PCA - RTS probability color scheme
-
-```{r}
-plot_ly(zonal_stats_class, 
-        x = ~PC1, y = ~PC2, z = ~PC3, 
-        color = ~prediction_mean_rts,
-        symbol = ~rts_class,
-        symbols = c('circle', 'circle-open'),
-        size = 1) %>%
-  add_markers() %>%
-  layout(scene = list(xaxis = list(title = 'PC1'),
-                      yaxis = list(title = 'PC2'),
-                      zaxis = list(title = 'PC3')))
-```
-
-WorldView
-
-```{r}
-plot_ly(zonal_stats_class %>%
-          filter(imagery == 'WorldView'), 
-        x = ~PC1, y = ~PC2, z = ~PC3, 
-        color = ~prediction_mean_rts,
-        symbol = ~rts_class,
-        symbols = c('circle', 'circle-open'),
-        size = 1) %>%
-  add_markers() %>%
-  layout(scene = list(xaxis = list(title = 'PC1'),
-                      yaxis = list(title = 'PC2'),
-                      zaxis = list(title = 'PC3')))
-```
-
-PlanetScope
-
-```{r}
-plot_ly(zonal_stats_class %>%
-          filter(imagery == 'PlanetScope'), 
-        x = ~PC1, y = ~PC2, z = ~PC3, 
-        color = ~prediction_mean_rts,
-        symbol = ~rts_class,
-        symbols = c('circle', 'circle-open'),
-        size = 1) %>%
-  add_markers() %>%
-  layout(scene = list(xaxis = list(title = 'PC1'),
-                      yaxis = list(title = 'PC2'),
-                      zaxis = list(title = 'PC3')))
-```
-
-Sentinel-2
-
-```{r}
-plot_ly(zonal_stats_class %>%
-          filter(imagery == 'Sentinel-2'), 
-        x = ~PC1, y = ~PC2, z = ~PC3, 
-        color = ~prediction_mean_rts,
-        symbol = ~rts_class,
-        symbols = c('circle', 'circle-open'),
-        size = 1) %>%
-  add_markers() %>%
-  layout(scene = list(xaxis = list(title = 'PC1'),
-                      yaxis = list(title = 'PC2'),
-                      zaxis = list(title = 'PC3')))
-```
-
-```{r}
-autoplot(zonal_stats_pca, 
-         data = zonal_stats_class, 
-         x = 1,
-         y = 2,
-         color = 'prediction_mean_rts',
-         shape = 'rts_class', 
-         loadings = TRUE, loadings.colour = 'black',
-         loadings.label = TRUE, loadings.label.size = 4,
-         loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'Mean RTS Probability') +
-  scale_shape_manual(name = 'RTS Class',
-                     labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2))
-
-autoplot(zonal_stats_pca, 
-         data = zonal_stats_class, 
-         x = 1,
-         y = 3,
-         color = 'prediction_mean_rts',
-         shape = 'rts_class', 
-         loadings = TRUE, loadings.colour = 'black',
-         loadings.label = TRUE, loadings.label.size = 4,
-         loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'Mean RTS Probability') +
-  scale_shape_manual(name = 'RTS Class',
-                     labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2))
-
-autoplot(zonal_stats_pca, 
-         data = zonal_stats_class, 
-         x = 2,
-         y = 3,
-         color = 'prediction_mean_rts',
-         shape = 'rts_class', 
-         loadings = TRUE, loadings.colour = 'black',
-         loadings.label = TRUE, loadings.label.size = 4,
-         loadings.label.colour = 'black') +
-  scale_color_viridis(name = 'Mean RTS Probability') +
-  scale_shape_manual(name = 'RTS Class',
-                     labels = c('RTS', 'Background', 'Delta'),
-                     values = c(16, 1, 2))
-```
-
 PCA - IoU color scheme
 
 ```{r}
@@ -4558,30 +4465,6 @@ autoplot(zonal_stats_pca,
                      labels = c('RTS', 'Background', 'Delta'),
                      values = c(16, 1, 2))
 ```
-
-### Prediction Quality Random Forest
-
-```{r}
-pq_rf <- randomForest::randomForest(pq_ci ~ .,
-                                    data = zonal_stats %>%
-                                      as_tibble() %>%
-                                      select(-c(id, rts_iou, mean_iou, mean_iou_v2, 
-                                                pq_ci_size, prediction_mean_rts,
-                                                prediction_mean_bg)) %>%
-                                      mutate(rts_class = case_when(
-                                        rts_class == 'RTS' ~ 'rts',
-                                        rts_class == 'Delta' ~ 'delta',
-                                        rts_class == 'Background' ~ 'bg')
-                                      ) %>%
-                                      pivot_wider(names_from = rts_class,
-                                                  values_from = r_mean:sr_sd))
-```
-
-```{r}
-print(pq_rf)
-```
-
-No, we can't predict the prediction quality very well based on the input data, feature size, shape, region, etc.
 
 
 ## RTS Morphology
