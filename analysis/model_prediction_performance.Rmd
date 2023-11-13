@@ -3497,6 +3497,7 @@ zonal_stats_mean <- zonal_stats %>%
   pivot_longer(r_mean:sr_sd, names_to = 'variable', values_to = 'value') %>%
   summarise(value_mean = mean(value, na.rm = TRUE),
             value_sd = sd(value, na.rm = TRUE),
+            value_se = sd(value, na.rm = TRUE)/n(),
             .by = c('imagery', 'pq_ci', 'rts_class', 'variable')) %>%
   filter(variable %in% zonal_stats_variables) %>%
   mutate(variable = factor(variable,
@@ -3557,19 +3558,25 @@ zonal_stats_contrasts_mean <- zonal_stats_contrasts %>%
   select(imagery, rts_class, variable, contrast, estimate, se, p_value, star_label, 
          y_adjust, variable_num, xmin, xmax) %>%
   left_join(zonal_stats_mean %>%
-              mutate(upr = value_mean + value_sd) %>%
-              filter(upr == max(upr),
+              mutate(upr_sd = value_mean + value_sd,
+                     upr_se = value_mean + value_se) %>%
+              filter(upr_sd == max(upr_sd),
                      .by = c('imagery', 'variable', 'rts_class')) %>%
-              select(imagery, variable, rts_class, upr),
+              select(imagery, variable, rts_class, upr_sd, upr_se),
             by = c('imagery', 'variable', 'rts_class')) %>%
   mutate(
-    y = case_when(
+    y_sd = case_when(
       contrast %in% c('High - Expected', 'Expected - Low') ~ 
-        upr + 0.05,
+        upr_sd + 0.05,
       contrast == 'High - Low' ~ 
-        upr + 0.2
+        upr_sd + 0.2
     ),
-    group = paste(variable, contrast, sep = '_')
+    y_se = case_when(
+      contrast %in% c('High - Expected', 'Expected - Low') ~ 
+        upr_se + 0.05,
+      contrast == 'High - Low' ~ 
+        upr_se + 0.2
+    ),group = paste(variable, contrast, sep = '_')
   )
 ```
 
@@ -3584,6 +3591,7 @@ x_axis_labels <- c('Red',
                    expression(sigma ~ 'Green'),
                    expression(sigma ~ 'Blue'))
 
+# with SD for error bars
 ggplot(zonal_stats_mean,
        aes(x = variable_num, color = pq_ci)) +
   # geom_vline(xintercept = c(0.5, 4.5, 6.5, 7.5, 11.5, 12.5, 13.5), color = 'gray80') +
@@ -3606,7 +3614,7 @@ ggplot(zonal_stats_mean,
                 width = 0.25,
                 linewidth = 0.25) +
   geom_signif(data = zonal_stats_contrasts_mean,
-              aes(x = xmin, y = y, xend = xmax, yend = y,
+              aes(x = xmin, y = y_sd, xend = xmax, yend = y_sd,
                   annotation = star_label, vjust = y_adjust,
                   group = group),
               stat = "identity",
@@ -3638,6 +3646,76 @@ ggplot(zonal_stats_mean,
   theme(
     axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
     panel.grid.major.x = element_blank())
+
+# ggsave('./figures/zonal_stats_summary_sd.pdf',
+#        height = 6,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_summary_sd.jpg',
+#        height = 6,
+#        width = 6.5)
+
+# with SE for error bars
+ggplot(zonal_stats_mean,
+       aes(x = variable_num, color = pq_ci)) +
+  # geom_vline(xintercept = c(0.5, 4.5, 6.5, 7.5, 11.5, 12.5, 13.5), color = 'gray80') +
+  geom_rect(data = tibble(xmin = c(0.5, 5.5),
+                          xmax = c(3.5, 6.5),
+                          ymin = -Inf,
+                          ymax = Inf),
+            aes(xmin = xmin,
+                xmax = xmax,
+                ymin = ymin,
+                ymax = ymax),
+            inherit.aes = FALSE,
+            fill = 'gray90',
+            alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'gray50') +
+  geom_point(aes(y = value_mean),
+             size = 0.5) +
+  geom_errorbar(aes(ymin = value_mean - value_se, 
+                    ymax = value_mean + value_se),
+                width = 0.25,
+                linewidth = 0.25) +
+  geom_signif(data = zonal_stats_contrasts_mean,
+              aes(x = xmin, y = y_se, xend = xmax, yend = y_se,
+                  annotation = star_label, vjust = y_adjust,
+                  group = group),
+              stat = "identity",
+              manual = TRUE,
+              tip_length = 1,
+              inherit.aes = FALSE,
+              na.rm = TRUE) +
+  geom_text(
+    data = tibble(
+      x = c(2, 4.5, 6, 8),
+      y = rep(c(-1, -0.8), 2),
+      label = c('Luminance', 'Plants', 'Moisture', 'Patchiness')
+    ),
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    size = 2.5
+  ) +
+  scale_x_continuous(
+    name = 'Variable',
+    breaks = seq(1:length(unique(zonal_stats_mean$variable))),
+    labels = x_axis_labels,
+    expand = expansion(mult = c(0.02, 0.033))
+    ) +
+  scale_y_continuous(name = 'Z-Score') +
+  scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery,
+               scales = 'free_y') +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    panel.grid.major.x = element_blank())
+
+# ggsave('./figures/zonal_stats_summary_se.pdf',
+#        height = 6,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_summary_se.jpg',
+#        height = 6,
+#        width = 6.5)
 ```
 
 These plots summarize the input data values (mean or standard deviation) in RTS cells, background cells, and the normalized difference between the two (`Delta = RTS - Background`). Most of the input layer names should be self explanatory, but for the others:
