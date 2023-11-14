@@ -2324,6 +2324,11 @@ site_map <- ggplot(world_north) +
           fill = 'transparent',
           linewidth = 1,
           inherit.aes = FALSE) +
+  geom_sf(data = crop_poly, 
+          color = 'gray60',
+          fill = 'transparent',
+          linewidth = 0.5,
+          inherit.aes = FALSE) +
   geom_sf_label(data = regions,
           aes(geometry = geometry, label = region),
           hjust = 'outward',
@@ -2335,11 +2340,6 @@ site_map <- ggplot(world_north) +
           label.size = NA,
           label.r = unit(0.1, 'lines')
           ) +
-  geom_sf(data = crop_poly, 
-          color = 'gray60',
-          fill = 'transparent',
-          linewidth = 0.5,
-          inherit.aes = FALSE) +
   scale_color_viridis(name = 'Region',
                       discrete = TRUE,
                       guide = 'none',
