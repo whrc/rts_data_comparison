@@ -3587,9 +3587,9 @@ x_axis_labels <- c('Red',
                    'NIR',
                    'NDVI',
                    'NDWI',
-                   expression(sigma ~ 'Red'),
-                   expression(sigma ~ 'Green'),
-                   expression(sigma ~ 'Blue'))
+                   expression(sigma ~ ' Red'),
+                   expression(sigma ~ ' Green'),
+                   expression(sigma ~ ' Blue'))
 
 # with SD for error bars
 ggplot(zonal_stats_mean,
@@ -3652,6 +3652,71 @@ ggplot(zonal_stats_mean,
 #        width = 6.5)
 # ggsave('./figures/zonal_stats_summary_sd.jpg',
 #        height = 6,
+#        width = 6.5)
+
+# with SD for error bars and no delta
+ggplot(zonal_stats_mean %>%
+         filter(rts_class != 'Delta (RTS - BG)'),
+       aes(x = variable_num, color = pq_ci)) +
+  # geom_vline(xintercept = c(0.5, 4.5, 6.5, 7.5, 11.5, 12.5, 13.5), color = 'gray80') +
+  geom_rect(data = tibble(xmin = c(0.5, 5.5),
+                          xmax = c(3.5, 6.5),
+                          ymin = -Inf,
+                          ymax = Inf),
+            aes(xmin = xmin,
+                xmax = xmax,
+                ymin = ymin,
+                ymax = ymax),
+            inherit.aes = FALSE,
+            fill = 'gray90',
+            alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'gray50') +
+  geom_point(aes(y = value_mean),
+             size = 0.5) +
+  geom_errorbar(aes(ymin = value_mean - value_sd, 
+                    ymax = value_mean + value_sd),
+                width = 0.25,
+                linewidth = 0.25) +
+  geom_signif(data = zonal_stats_contrasts_mean %>%
+         filter(rts_class != 'Delta (RTS - BG)'),
+              aes(x = xmin, y = y_sd, xend = xmax, yend = y_sd,
+                  annotation = star_label, vjust = y_adjust,
+                  group = group),
+              stat = "identity",
+              manual = TRUE,
+              tip_length = 1,
+              inherit.aes = FALSE,
+              na.rm = TRUE) +
+  geom_text(
+    data = tibble(
+      x = c(2, 4.5, 6, 8),
+      y = rep(c(-1.4, -1.2), 2),
+      label = c('Luminance', 'Plants', 'Moisture', 'Patchiness')
+    ),
+    aes(x = x, y = y, label = label),
+    inherit.aes = FALSE,
+    size = 2.5
+  ) +
+  scale_x_continuous(
+    name = 'Variable',
+    breaks = seq(1:length(unique(zonal_stats_mean$variable))),
+    labels = x_axis_labels,
+    expand = expansion(mult = c(0.02, 0.033))
+    ) +
+  scale_y_continuous(name = 'Z-Score') +
+  scale_color_manual(values = pq_colors,
+                       guide = 'none') +
+    facet_grid(rts_class ~ imagery,
+               scales = 'free_y') +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    panel.grid.major.x = element_blank())
+
+# ggsave('./figures/zonal_stats_summary_sd_no_delta.pdf',
+#        height = 4.25,
+#        width = 6.5)
+# ggsave('./figures/zonal_stats_summary_sd_no_delta.jpg',
+#        height = 4.25,
 #        width = 6.5)
 
 # simplified version with only delta
