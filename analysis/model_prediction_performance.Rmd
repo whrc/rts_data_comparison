@@ -476,8 +476,8 @@ plot_individual_prediction <- function(imagery_type, raster_data, vector_data, d
                       values = levels(input_data$color_hex),
                       guide = 'none') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation',
-                linewidth = 'Validation'),
+                color = 'Ground\nTruth',
+                linewidth = 'Ground\nTruth'),
             fill = 'transparent') +
     scale_color_manual(name = '',
                        values = c('gray70'),
@@ -592,8 +592,8 @@ plot_pred_rgb <- function(pid) {
                       values = levels(input_data$color_hex),
                       guide = 'none') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation',
-                linewidth = 'Validation'),
+                color = 'Ground\nTruth',
+                linewidth = 'Ground\nTruth'),
             fill = 'transparent') +
     scale_color_manual(name = '',
                        values = c('gray70'),
@@ -688,8 +688,8 @@ plot_pred_single_band <- function(pid, input_layer) {
                 inherit.aes = FALSE) +
     scale_fill_viridis(name = input_layer) +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation',
-                linewidth = 'Validation'),
+                color = 'Ground\nTruth',
+                linewidth = 'Ground\nTruth'),
             fill = 'transparent') +
     scale_color_manual(name = '',
                        values = c('gray70'),
@@ -840,8 +840,8 @@ plot_pred_prob <- function(pid) {
                          midpoint = 0.5,
                          limits = c(0, 1)) +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation',
-                linewidth = 'Validation'),
+                color = 'Ground\nTruth',
+                linewidth = 'Ground\nTruth'),
             fill = 'transparent') +
     scale_color_manual(name = '',
                        values = c('gray10'),
@@ -4691,7 +4691,7 @@ ggplot(polys %>%
              color = 'gray') +
   geom_smooth(method = 'lm', color = 'black') +
   scale_x_continuous(name = 'RTS Area (vector ground truth)') +
-  scale_y_continuous(name = 'Validation Area (raster ground truth)') +
+  scale_y_continuous(name = 'RTS Area (raster ground truth)') +
   coord_fixed()
 
 # there are a few RTS that are too big to fit into the tile, which have been omitted
@@ -4715,7 +4715,7 @@ ggplot(polys %>%
   geom_smooth(method = 'lm', color = 'black') +
   scale_x_continuous(name = 'RTS Shape (vector ground truth)',
                      limits = c(0, 1)) +
-  scale_y_continuous(name = 'Validation Shape (raster ground truth)',
+  scale_y_continuous(name = 'RTS Shape (raster ground truth)',
                      limits = c(0, 1)) +
   coord_fixed(expand = FALSE)
 
@@ -4756,7 +4756,7 @@ ggplot(polys %>%
   geom_smooth(method = 'lm', color = 'black') +
   scale_x_continuous(name = 'RTS Shape (vector ground truth)',
                      limits = c(0, 1)) +
-  scale_y_continuous(name = 'Validation Shape (corrected to vector)',
+  scale_y_continuous(name = 'RTS Shape (corrected to vector)',
                      limits = c(0, 1)) +
   coord_fixed(expand = FALSE)
 
@@ -5346,7 +5346,7 @@ ggplot(data = polys %>%
                     values = levels(input_data$color_hex),
                     guide = 'none') +
   geom_sf(aes(geometry = val_geometry,
-              color = 'Validation'),
+              color = 'Ground\nTruth'),
           fill = 'transparent',
           linewidth = 0.5) +
   scale_color_manual(values = c('gray90')) +
@@ -5372,7 +5372,7 @@ ggplot(data = polys %>%
                     values = levels(input_data$color_hex),
                     guide = 'none') +
   geom_sf(aes(geometry = val_geometry,
-              color = 'Validation'),
+              color = 'Ground\nTruth'),
           fill = 'transparent',
           linewidth = 0.5) +
   scale_color_manual(values = c('gray90')) +
@@ -5430,7 +5430,7 @@ for (rts_id in rts_ids) {
                         values = levels(input_data$color_hex),
                         guide = 'none') +
       geom_sf(aes(geometry = val_geometry,
-                  color = 'Validation'),
+                  color = 'Ground\nTruth'),
               fill = 'transparent',
               linewidth = 0.5) +
       scale_color_manual(values = c('gray90')) +
@@ -5639,7 +5639,7 @@ plots <- map(
             color = 'black',
             fill = 'transparent') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
+                color = 'Ground\nTruth'),
             fill = 'transparent',
             linewidth = 0.5) +
     geom_sf(aes(geometry = pred_geometry,
@@ -5692,7 +5692,7 @@ plots <- map(
             color = 'black',
             fill = 'transparent') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
+                color = 'Ground\nTruth'),
             fill = 'transparent',
             linewidth = 0.5) +
     geom_sf(aes(geometry = pred_geometry,
@@ -5741,7 +5741,7 @@ plots <- map(
             color = 'black',
             fill = 'transparent') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
+                color = 'Ground\nTruth'),
             fill = 'transparent',
             linewidth = 0.5) +
     geom_sf(aes(geometry = pred_geometry,
@@ -5790,7 +5790,7 @@ plots <- map(
             color = 'black',
             fill = 'transparent') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
+                color = 'Ground\nTruth'),
             fill = 'transparent',
             linewidth = 0.5) +
     geom_sf(aes(geometry = pred_geometry,
@@ -5839,7 +5839,7 @@ plots <- map(
             color = 'black',
             fill = 'transparent') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
+                color = 'Ground\nTruth'),
             fill = 'transparent',
             linewidth = 0.5) +
     geom_sf(aes(geometry = pred_geometry,
@@ -5888,7 +5888,7 @@ plots <- map(
             color = 'black',
             fill = 'transparent') +
     geom_sf(aes(geometry = val_geometry,
-                color = 'Validation'),
+                color = 'Ground\nTruth'),
             fill = 'transparent',
             linewidth = 0.5) +
     geom_sf(aes(geometry = pred_geometry,
