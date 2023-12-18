@@ -2783,6 +2783,26 @@ knitr::kable(
     summarise(missed_feature_count = n(),
               .by = c('imagery', 'region', 'status'))
 )
+
+ggplot(
+  polys %>%
+    filter(imagery == 'WorldView'),
+  aes(x = rts_area)
+) +
+  geom_freqpoly() +
+  scale_x_log10()
+
+ecdf(
+  polys %>%
+    filter(imagery == 'WorldView') %>%
+    pull(rts_area)
+    )(4612)
+mean(polys %>%
+    filter(imagery == 'WorldView') %>%
+    pull(rts_area))
+median(polys %>%
+    filter(imagery == 'WorldView') %>%
+    pull(rts_area))
 ```
 
 
