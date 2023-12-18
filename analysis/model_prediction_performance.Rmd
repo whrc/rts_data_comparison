@@ -3160,14 +3160,13 @@ ggplot(iou_ci %>%
     data = tibble(
       x = x_limits[2]/2,
       y = vmax,
-      label = as.character(expression('V'[max]))
+      label = 'Maximum RTS IoU'
     ),
     aes(x = x, y = y, label = label),
     color = 'black',
     size = 2.5,
     vjust = 0,
-    nudge_y = 0.01,
-    parse = TRUE
+    nudge_y = 0.01
   ) +
   scale_x_continuous(name = 'RTS Area (ha)',
                      limits = x_limits) +
@@ -3177,11 +3176,11 @@ ggplot(iou_ci %>%
         axis.ticks.x = element_blank())
 #   
 # ggsave('./figures/threshold_demonstration.pdf',
-#        height = 2.5,
-#        width = 3.25)
+#        height = 3,
+#        width = 4.5)
 # ggsave('./figures/threshold_demonstration.jpg',
-#        height = 2.5,
-#        width = 3.25)
+#        height = 3,
+#        width = 4.5)
 ```
 
 ```{r, fig.width = 12}
