@@ -1,0 +1,245 @@
+---
+title: "data_download"
+author: "Heidi Rodenhizer"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Download Files
+
+```{r}
+loc_dir <- './data'
+gd_dir <- 'data/DATA_V3_GEOTIFFS'
+# maxar_pred_dir <- 'MAXAR20230623_161858_p25062023'
+maxar_pred_dir <- 'MAXAR20230621_022422_p21062023'
+planet_pred_dir <- 'PLANET20230621_190115_p21062023'
+sentinel_pred_dir <- 'SENTINEL220230621_171002_p21062023'
+
+gd_pred_folders <- drive_ls(paste0(gd_dir, '/TESTSET_INFERENCE')) %>%
+  filter(name ==  maxar_pred_dir |
+           name == planet_pred_dir |
+           name == sentinel_pred_dir)
+
+gd_maxar_input_folders <- drive_ls(paste0(gd_dir, '/MAXAR')) %>%
+  filter(str_detect(name, 'valtest'))
+gd_planet_input_folders <- drive_ls(paste0(gd_dir, '/PLANET')) %>%
+  filter(str_detect(name, 'valtest'))
+gd_sentinel_input_folders<- drive_ls(paste0(gd_dir, '/SENTINEL2')) %>%
+  filter(str_detect(name, 'valtest'))
+```
+
+```{r}
+# check if prediction files have already been downloaded
+loc_filepaths <- list.files(loc_dir,
+                            full.names = TRUE,
+                            recursive = TRUE)
+
+# WorldView
+maxar_pred_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0(maxar_pred_dir))
+]
+maxar_input_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0('maxar/(', 
+                    gd_maxar_input_folders$name[1], '|', 
+                    gd_maxar_input_folders$name[2], ')'))
+]
+
+# PlanetScope
+planet_pred_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0(planet_pred_dir))
+]
+planet_input_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0('planet/(', 
+                    gd_planet_input_folders$name[1], '|', 
+                    gd_planet_input_folders$name[2], ')'))
+]
+
+# Sentinel
+sentinel_pred_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0(sentinel_pred_dir))
+]
+sentinel_input_files <- loc_filepaths[
+  str_detect(loc_filepaths, 
+             paste0('sentinel/(', 
+                    gd_sentinel_input_folders$name[1], '|', 
+                    gd_sentinel_input_folders$name[2], ')'))
+]
+```
+
+```{r}
+if (length(maxar_pred_files) == length(planet_pred_files) & 
+    length(maxar_pred_files) == length(sentinel_pred_files) & 
+    length(maxar_pred_files) > 0) {
+  
+  print(paste('There are', length(maxar_pred_files), 'prediction tiles.'))
+  
+} else {
+  
+  # download WorldView predictions
+  maxar_pred_filepath <- paste0(loc_dir, '/maxar/predictions-', maxar_pred_dir)
+  maxar_pred_files <- drive_ls(gd_pred_folders %>%
+                                 filter(str_detect(name, 'MAXAR')),
+                               pattern = 'tif$') %>%
+    arrange(name)
+  
+  maxar_pred_files %>%
+    pmap(
+      \(name, id, drive_resource, directory)
+      googledrive_download(name, id, drive_resource, maxar_pred_filepath)
+    )
+  
+  maxar_pred_files <- list.files(maxar_pred_filepath,
+                                 pattern = 'tif$',
+                                 full.names = TRUE)
+  
+  # download PlanetScope predictions
+  planet_pred_filepath <- paste0(loc_dir, '/planet/predictions-', planet_pred_dir)
+  planet_pred_files <- drive_ls(gd_pred_folders %>%
+                                  filter(str_detect(name, 'PLANET')),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  planet_pred_files %>%
+    pmap(
+      \(name, id, drive_resource, directory)
+      googledrive_download(name, id, drive_resource, planet_pred_filepath)
+    )
+  
+  planet_pred_files <- list.files(planet_pred_filepath,
+                                  pattern = 'tif$',
+                                  full.names = TRUE)
+  
+  # download Sentinel-2 predictions
+  sentinel_pred_filepath <- paste0(loc_dir, '/sentinel/predictions-', sentinel_pred_dir)
+  sentinel_pred_files <- drive_ls(gd_pred_folders %>%
+                                    filter(str_detect(name, 'SENTINEL2')),
+                                  pattern = 'tif$') %>%
+    arrange(name)
+  
+  sentinel_pred_files %>%
+    pmap(
+      \(name, id, drive_resource, directory)
+      googledrive_download(name, id, drive_resource, sentinel_pred_filepath)
+    )
+  
+  sentinel_pred_files <- list.files(sentinel_pred_filepath,
+                                    pattern = 'tif$',
+                                    full.names = TRUE)
+  
+}
+
+rm(gd_pred_folders)
+```
+
+```{r}
+if (length(maxar_input_files) == length(planet_input_files) & 
+    length(maxar_input_files) == length(sentinel_input_files) &
+    length(maxar_input_files > 0)) {
+  
+  print(paste('There are', length(maxar_input_files), 'input data tiles.'))
+  
+} else {
+  
+  # Download WorldView Input Data Layers  
+  maxar_input_filepaths <- paste0(loc_dir, '/maxar/', gd_maxar_input_folders$name)
+  
+  maxar_input_files <- drive_ls(gd_maxar_input_folders %>%
+                                  slice(1),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  maxar_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, maxar_input_filepaths[1])
+    )
+  
+  maxar_input_files <- drive_ls(gd_maxar_input_folders %>%
+                                  slice(2),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  maxar_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, maxar_input_filepaths[2])
+    )
+  
+  maxar_input_files <- map(maxar_input_filepaths,
+                           ~ list.files(.x,
+                                        pattern = 'tif$',
+                                        full.names = TRUE))
+  maxar_input_files <- unlist(maxar_input_files)
+  
+  # Download PlanetScope Input Data Layers  
+  planet_input_filepaths <- paste0(loc_dir, '/planet/', gd_planet_input_folders$name)
+  
+  planet_input_files <- drive_ls(gd_planet_input_folders %>%
+                                  slice(1),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  planet_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, planet_input_filepaths[1])
+    )
+  
+  planet_input_files <- drive_ls(gd_planet_input_folders %>%
+                                  slice(2),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  planet_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, planet_input_filepaths[2])
+    )
+  
+  planet_input_files <- map(planet_input_filepaths,
+                           ~ list.files(.x,
+                                        pattern = 'tif$',
+                                        full.names = TRUE))
+  planet_input_files <- unlist(planet_input_files)
+  
+  # Download sentinel Input Data Layers  
+  sentinel_input_filepaths <- paste0(loc_dir, '/sentinel/', gd_sentinel_input_folders$name)
+  
+  sentinel_input_files <- drive_ls(gd_sentinel_input_folders %>%
+                                  slice(1),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  sentinel_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, sentinel_input_filepaths[1])
+    )
+  
+  sentinel_input_files <- drive_ls(gd_sentinel_input_folders %>%
+                                  slice(2),
+                                pattern = 'tif$') %>%
+    arrange(name)
+  
+  sentinel_input_files %>%
+    pmap(
+      \(name, id, drive_resource, directory) 
+      googledrive_download(name, id, drive_resource, sentinel_input_filepaths[2])
+    )
+  
+  sentinel_input_files <- map(sentinel_input_filepaths,
+                           ~ list.files(.x,
+                                        pattern = 'tif$',
+                                        full.names = TRUE))
+  sentinel_input_files <- unlist(sentinel_input_files)
+  
+}
+
+rm(gd_maxar_input_folders, gd_planet_input_folders, gd_sentinel_input_folders)
+```
+

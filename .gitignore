@@ -1,3 +1,10 @@
+# Project specific
+data/
+*.qgz
+figures/
+tables/
+manuscript/
+
 # History files
 .Rhistory
 .Rapp.history
@@ -47,3 +54,6 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Jupyter Notebook
+.ipynb_checkpoints
